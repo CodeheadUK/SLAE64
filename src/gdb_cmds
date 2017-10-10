@@ -1,0 +1,9 @@
+set disassembly-flavor intel
+break _main
+run
+layout asm
+layout reg
+define hook-stop
+x/32xw $rsp
+end
+
