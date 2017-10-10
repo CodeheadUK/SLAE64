@@ -1,0 +1,34 @@
+Blog Post #1
+
+The first assignment in the SLAE64 final assessment is to create a piece of shellcode that will start a TCP Bind Shell. A bind shell listens on a network port and waits for an incoming connection. When a connection request is received, a new socket is spawned, the standard streams of the host are cloned into the new socket and a new shell instance is invoked. 
+
+This has the effect of giving the remote user an interactive shell on the host system. Of course this is not as secure as something like an SSH connection, but is quite sufficient to let a remote user poke around the host system, issue commands and exfiltrate data.
+
+As an extra twist, the assignment requires a little more security. A passphrase must be implemented in the bind shell. This prevents anyone who happens to stumble across the listening socket from simply dropping into the host system.
+
+Of course, this 'security' is limited and anyone eavesdropping on the connection could sniff the passphrase with minimal effort, but it is an interesting exercise.
+
+### High Level Proof of Concept
+
+Vivek provided a rough outline of some C code during the course and this was taken as a base for the project.
+
+
+
+The sockaddr_in structure is described in netinet/in.h
+
+struct sockaddr_in {
+    short            sin_family;   // 2 Bytes. e.g. AF_INET (2)
+    unsigned short   sin_port;     // 2 Bytes. Network order.
+    struct in_addr   sin_addr;     // see struct in_addr, below
+    char             sin_zero[8];  // Zero padding. 8 bytes.
+};
+
+struct in_addr {
+    unsigned long s_addr;  // 4 bytes.
+};
+
+This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
+
+http://www.securitytube-training.com/online-courses/x8664-assembly-and-shellcoding-on-linux/index.html
+
+Student ID: SLAE64-XXXXX
