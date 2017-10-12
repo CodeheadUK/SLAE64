@@ -50,13 +50,13 @@ _bind: ; Bind the Socket
 	jle _exit
 	nop
 
-	mov rax, 0
-	push rax
+	mov rax, 16
 	push rax
 
 _accept:	; Accept a connection
-	lea rsi, [rbp-40]
+	lea rsi, [rbp-16]
 	mov rax, 43
+	lea rdx, [rbp-24]
 	syscall
 	cmp rax, -1
 	jle _exit
