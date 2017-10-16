@@ -63,19 +63,41 @@ _accept:			; Accept a connection
 	push rax		; Store client socket id
 
 ; auth stuff
-	mov rsi, r15
-	mov rdx, 24
+
+	mov rsi, r15		; string address
+	mov rdx, 24		; string length
 	call _prompt
 
-	mov rdi, [rbp-40]
-	lea rsi, [rbp-16]
-	mov rdx, 8
+	mov rdi, [rbp-40]	; socket id
+	lea rsi, [rbp-16]	; buffer address
+	mov rdx, 8		; buffer length
 	mov rcx, 0
 	mov r8, 0
 	mov r9, 0
-	mov rax, 45
+	mov rax, 45		; recvfrom
 	syscall
 
+	; compare strings
+	lea rsi, [rbp-16]
+	lea rdi, [r15+24]
+	mov rcx, 8		; length
+_comploop:
+	cmpsb
+	jne _badpw
+	loop _comploop	
+	
+;pass
+	lea rsi, [r15+33]
+	mov rdx, 8
+	call _prompt
+	jmp _access	
+
+_badpw:
+	lea rsi, [r15+41]
+	mov rdx, 6
+	call _prompt	
+
+_access:
 	jmp _exit
 
 ; Duplicate I/O descriptors 
