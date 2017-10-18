@@ -86,7 +86,7 @@ _accept:
 	add rax, 43
 	mov rdi, [rbp-24]  	; socket id
 	lea rsi, [rbp-16] 	; sockaddr_in struct
-	lea rdx, [rsp]		; pointer to sockaddr_in size
+	lea rdx, [rbp-32]	; pointer to sockaddr_in size
 	syscall
 	cmp rax, -1
 	jle _exit
