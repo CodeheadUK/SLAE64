@@ -25,15 +25,15 @@ _exit:		; exit nicely
 	mov rsp, rbp
 	syscall	
 
-_prompt:	; send string to a socket, RDI and RCX populated before call	
+_prompt:	; send string to a socket, RSI and RDX populated before call	
 	mov rdi, [rbp-40]
 	xor rax, rax
-	push rax
+	push rax	; push/pop has less instructions than mov for the lower registers
+	push rax	
 	pop rcx
-	push rcx
 	pop r8
-	mov r9, r8
-	add rax, 44
+	mov r9, r8	; mov is more efficient for r8 - r15
+	add rax, 44	; sys_sendto
 	syscall
 	ret
 
@@ -102,11 +102,14 @@ _accept:
 	mov rdi, [rbp-40]	; socket id
 	lea rsi, [rbp-16]	; buffer address
 	xor rcx, rcx 		; Zero out registers
-	mov r8, rcx
-	mov r9, rcx
-	mov rdx, rcx
+	push rcx
+	push rcx
+	push rcx
+	pop rdx
+	pop rax
+	pop r8
+	mov r9, r8	
 	add rdx, 8		; buffer length
-	mov rax, rcx
 	add rax, 45		; recvfrom
 	syscall
 
@@ -134,7 +137,8 @@ _badpw:
 	add rdx, 6		; fail length
 	call _prompt
 	xor rax, rax		; zero out regs
-	mov rsi, rax
+	push rax
+	pop rsi
 	add rax, 48		; shutdown client socket
 	pop rdi			; last use of client sock id
 	add rsi, 2		; SHUT_RDWR

