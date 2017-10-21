@@ -24,7 +24,7 @@ Of course, this 'security' is limited and anyone eavesdropping on the connection
 
 Vivek provided a rough outline of the code in C during the course and this was taken as a base for this assignment.
 
-The full listing of my version of the code is hosted on GitHub: [Bind_Shell.c](https://github.com/CodeheadUK/SLAE64/blob/master/src/bind_shell.c).
+The full listing of my version of the code is hosted on GitHub: [Bind_Shell.c](https://github.com/CodeheadUK/SLAE64/blob/master/assignment_1/bind_shell.c).
 
 The basic sections of code are:
 
@@ -298,13 +298,19 @@ Having done some 32-bit assembler, I was used to calling functions with the argu
 
 The order is as follows:
 
-Argument | Arg1 | Arg2 | Arg3 | Arg4 | Arg5 | Arg6
----------|:----:|:----:|:----:|:----:|:----:|:-----:
-Register | RDI  | RSI  | RDX  | RCX  |R8    | R9
+Argument | Arg1 | Arg2 | Arg3 | Arg4 | Arg5 | Arg6 
+---------|:----:|:----:|:----:|:----:|:----:|:----:
+Register | RDI  | RSI  | RDX  | RCX  | R8   | R9   
 
 Return values are still found in RAX.
 
 Unsurprisingly, Microsoft uses a different method. The various register schemes are listed on the [x86-64 Wiki Page](https://en.wikipedia.org/wiki/X86_calling_conventions#x86-64_calling_conventions).
+
+As an extra twist to keep us on our toes, when performing AMD64 syscalls, the registers are slightly different. R10 is used in place of RCX.
+
+Argument | Arg1 | Arg2 | Arg3 | Arg4 | Arg5 | Arg6 
+---------|:----:|:----:|:----:|:----:|:----:|:----:
+Register | RDI  | RSI  | RDX  | R10  | R8   | R9 
 
 Another difference from x86 assembler is that we no longer trigger interrupt 0x80 for syscalls. The selection method remains the same, with the syscall number being placed in <tt>RAX</tt>, but there is now a dedicated <tt>syscall</tt> instruction. 
 
@@ -407,8 +413,8 @@ The code blocks at this point, waiting for connections. The error check is carri
 
 Assuming that we have a valid socket, we need to prompt the remote user for a password. In the C code, the <tt>send()</tt> function was used for this. However, I could not find a matching syscall in the kernel documentation. The nearest syscall was <tt>sys_sendto</tt> which required extra parameters:
 
- ID / RAX | Name | Arg1 / RDI | Arg2 / RSI | Arg3 / RDX | Arg4 / RCX | Arg5 / R8 | Arg6 / R9 
-:---------|:-----|:-----------|:-----------|:-----------|:-----------|:----------|:---------
+ ID / RAX | Name | Arg1 / RDI | Arg2 / RSI | Arg3 / RDX | Arg4 / R10 | Arg5 / R8 | Arg6 / R9 
+:---------|:-----|:-----------|:-----------|:-----------|:-----------|:-----------|:---------
 44|<tt>sys_sendto</tt>|<tt>int fd</tt>|<tt>void *buff</tt>|<tt>size_t len</tt>|<tt>unsigned flags</tt>|<tt>struct sockaddr *addr</tt>|<tt>int addr_len</tt>
 
 Digging a little further, I found the following snippet in <tt>net/socket.c</tt>:
@@ -435,8 +441,8 @@ As discussed earlier, we need to use this call in a few places during execution,
 
 To get the input from the remote user in the C code, we used <tt>read()</tt>. I could not find a <tt>read</tt> syscall, but <tt>recvfrom</tt> seemed to have a similar setup to the <tt>sendto</tt> method:
 
- ID / RAX | Name | Arg1 / RDI | Arg2 / RSI | Arg3 / RDX | Arg4 / RCX | Arg5 / R8 | Arg6 / R9 
-:---------|:-----|:-----------|:-----------|:-----------|:-----------|:----------|:---------
+ ID / RAX | Name | Arg1 / RDI | Arg2 / RSI | Arg3 / RDX | Arg4 / R10 | Arg5 / R8 | Arg6 / R9 
+:---------|:-----|:-----------|:-----------|:-----------|:-----------|:-----------|:---------
 45|<tt>sys_recvfrom</tt>|<tt>int fd</tt>|<tt>void *ubuf</tt>|<tt>size_t size</tt>|<tt>unsigned flags</tt>|<tt>struct sockaddr *addr</tt>|<tt>int *addr_len</tt>
 
 A quick test showed that the same pattern of zeroing out the later parameters could be used:
@@ -584,13 +590,14 @@ _spawn:
 
 ### Testing the code out
 
-We can build the final .nasm file with the following command line:
+The complete final file is hosted at GitHub (shell_bind.nasm)[https://github.com/CodeheadUK/SLAE64/blob/master/assignment_1/bind_shell.nasm]
+We can build this .nasm file with the following command line:
 
 {{< highlight text >}}
 nasm -felf64 bind_shell.nasm -o bind_shell.o && ld bind_shell.o -o bind_shell
 {{</ highlight >}}
 
-Running the final binary results in the application blocking while it awaits connection:
+Running the resulting binary, we see in the application blocking while it awaits connection:
 
 {{< highlight text >}}
 codehead@ubuntu:~/SLAE64/src$ ./bind_shell
@@ -656,6 +663,8 @@ The resulting shellcode string contains no troublesome NULL bytes.
 \xfe\xff\xff
 {{</ highlight >}}
 
+Running it in Vivek's shellcode stub sh
+
 However, at 443 bytes, it is a little on the large side. This is mainly due to the bells and whistles of prompts, error checking and clean exits. If we strip away all the fluff and just leave the core functionality, we can get the shellcode down to a more respectable 262 bytes.
 
 {{< highlight text >}}
@@ -682,4 +691,3 @@ This blog post has been created for completing the requirements of the SecurityT
 http://www.securitytube-training.com/online-courses/x8664-assembly-and-shellcoding-on-linux/index.html
 
 Student ID: SLAE64-1471
-
