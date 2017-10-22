@@ -7,7 +7,7 @@ _start:
 
 _getref:	; Keep reference to strings
 	pop r15
-	jmp _main
+	jmp short _main
 
 _strdata:
 	call _getref		; call pushes RIP onto stack
@@ -27,18 +27,15 @@ _exit:		; exit nicely
 
 _prompt:	; send string to a socket, RSI and RDX populated before call	
 	mov rdi, [rbp-40]
-	xor rax, rax
-	push rax	; push/pop has less instructions than mov for the lower registers
-	push rax	
-	pop rcx
-	pop r8
-	mov r9, r8	; mov is more efficient for r8 - r15
+	xor rax, rax	
+	mov r10, rax	; Zero unused params
+	mov r8, rax
+	mov r9, rax	
 	add rax, 44	; sys_sendto
 	syscall
 	ret
 
 _main:
-
 ; Build a server sockaddr_in struct on the stack
 	xor rax, rax
 	push rax
@@ -101,14 +98,13 @@ _accept:
 
 	mov rdi, [rbp-40]	; socket id
 	lea rsi, [rbp-16]	; buffer address
-	xor rcx, rcx 		; Zero out registers
-	push rcx
-	push rcx
-	push rcx
+	xor rax, rax 		; Zero out registers
+	push rax
+	push rax
 	pop rdx
-	pop rax
-	pop r8
-	mov r9, r8	
+	pop r10
+	mov r8, rax
+	mov r9, rax	
 	add rdx, 8		; buffer length
 	add rax, 45		; recvfrom
 	syscall
