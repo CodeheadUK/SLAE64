@@ -52,14 +52,13 @@ _accept:
 ; authenticate incoming connection
 	mov rdi, [rbp-40]	; socket id
 	lea rsi, [rbp-16]	; buffer address
-	xor rcx, rcx 		; Zero out registers
-	push rcx
-	push rcx
-	push rcx
+	xor rax, rax 		; Zero out registers
+	push rax
+	push rax
 	pop rdx
-	pop rax
-	pop r8
-	mov r9, r8	
+	pop r10
+	mov r8, rax
+	mov r9, rax	
 	add rdx, 8		; buffer length
 	add rax, 45		; recvfrom
 	syscall
