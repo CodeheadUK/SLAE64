@@ -1,0 +1,69 @@
++++
+title = "Security Tube SLAE64 Course - Assessment 2 - TCP Reverse Shell"
+author = "Codehead"
+layout = "post"
+date = "2017-10-24T14:02:00"
+url = "/slae64-02-reverse-shell/"
+categories = [ "SLAE64", "Assembler", "Shellcode" ]
+tags = [ "shellcode", "assembler", "linux", "x64" ]
++++
+
+After completing the video lectures of the [Security Tube Linux 64 bit Assembler Expert course (SLAE64)](http://www.securitytube-training.com/online-courses/x8664-assembly-and-shellcoding-on-linux/index.html), a series of assessments must be completed to gain certification. This is the second assignment: Create a shellcode string that will start a TCP Reverse Shell. 
+
+A reverse shell connects to a remote listener on a given network address and port. Any commands issued by the remote host are relayed back to a local shell in the same way as the bind shell. Having the target reach out to the remote machine may seem like an odd way of making the connection, especially as the remote must be ready and listening for the connection to be successful. However, this type of connection is preferable if the target is behind a firewall or a network address translation (NAT) layer which would make inbound connections to bind shells difficult. 
+
+As with the bind shell a passphrase must be implemented to add a layer of security to the program.
+
+<!--more-->
+
+## High Level Proof of Concept
+
+Again, Vivek provided a rough outline of the code in C during the course and this was taken as a base for this assignment.
+
+The full listing of my version of the code is hosted on GitHub: [Bind_Shell.c](https://github.com/CodeheadUK/SLAE64/blob/master/assignment_1/reverse_shell.c).
+
+The basic sections of code are:
+
+### Variable Definitions and Initialisation
+
+{{< highlight c >}}
+// Socket descriptors
+int svr_sock;
+int client_sock;
+
+// Socket definitions
+struct sockaddr_in server;
+struct sockaddr_in client;
+int sockaddr_len = sizeof(struct sockaddr_in);
+
+// Some strings
+char *arguments[] = { "/bin/sh", 0 };
+char *in[] = { "xxxxxxxxxx", 0 };
+bzero(&in, 10);
+
+// Loop flag
+int connected = 0;
+{{</ highlight >}}
+
+### Validating the user
+
+ ID / RAX | Name | Arg1 / RDI | Arg2 / RSI | Arg3 / RDX | Arg4 / R10 | Arg5 / R8 | Arg6 / R9 
+:---------|:-----|:-----------|:-----------|:-----------|:-----------|:-----------|:---------
+44|<tt>sys_sendto</tt>|<tt>int fd</tt>|<tt>void *buff</tt>|<tt>size_t len</tt>|<tt>unsigned flags</tt>|<tt>struct sockaddr *addr</tt>|<tt>int addr_len</tt>
+
+
+{{< highlight c >}}
+SYSCALL_DEFINE4(send, int, fd, void __user *, buff, size_t, len,
+        unsigned, flags)
+{
+    return sys_sendto(fd, buff, len, flags, NULL, 0);
+}
+{{</ highlight >}}
+
+
+This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
+
+http://www.securitytube-training.com/online-courses/x8664-assembly-and-shellcoding-on-linux/index.html
+
+Student ID: SLAE64-1471
+
