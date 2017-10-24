@@ -10,7 +10,11 @@ tags = [ "shellcode", "assembler", "linux", "x64" ]
 
 After completing the video lectures of the [Security Tube Linux 64 bit Assembler Expert course (SLAE64)](http://www.securitytube-training.com/online-courses/x8664-assembly-and-shellcoding-on-linux/index.html), a series of assessments must be completed to gain certification. The first assignment is to create a shellcode string that will start a TCP Bind Shell. 
 
-A bind shell listens on a network port and waits for an incoming connection. When a connection is received, a new socket is created, the I/O streams of the host are cloned into this new socket and a new shell instance is spawned. This has the effect of giving the remote user an interactive shell on the host system. Of course this is not as secure as something like an SSH connection, but is quite sufficient to let a remote user poke around the host system, issue commands and exfiltrate data.
+A bind shell listens on a network port and waits for an incoming connection. When a connection is received, a new socket is created, the I/O streams of the host are cloned into this new socket and a new shell instance is spawned. 
+
+![image](img/bindshell.png)
+
+This has the effect of giving the remote user an interactive shell on the host system. Of course this is not as secure as something like an SSH connection, but is quite sufficient to let a remote user poke around the host system, issue commands and exfiltrate data.
 
 As an extra twist, the assignment requires a little more security; a passphrase must be implemented in the bind shell code to prevent anyone who happens to stumble across the listening socket from simply dropping into the host shell.
 
