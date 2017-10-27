@@ -1,8 +1,12 @@
+// Paste shellcode into the code[] array in \x90\x90\x90\x90 format
+// Compile with: 
+//      gcc -z execstack -fno-stack-protector shellcode_wrapper.c -o shellcode
+
 #include<stdio.h>
 #include<string.h>
-
+ 
 unsigned char code[] = \
-"{Paste Shellcode here in \x90\x90\x90\x90 format}";
+"\x90\x90\x90\x90";
 
 main()
 {
