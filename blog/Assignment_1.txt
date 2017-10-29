@@ -294,7 +294,7 @@ To create the socket, we use the <tt>socket</tt> syscall which matches the <tt>s
  41 | <tt>sys_socket</tt> | <tt>int family</tt> | <tt>int type</tt> | <tt>int protocol</tt> 
 
 
-Having done some 32-bit assembler, I was used to calling functions with the arguments on the stack. However, in AMD64 code, the arguments are passed in registers.
+Having done some 32-bit assembler, I was used to calling functions with the arguments on the stack. However, x86 syscalls expect the parameters to be passed in registers. In AMD64, all functions have their arguments are passed in registers.
 
 The order is as follows:
 
@@ -303,8 +303,8 @@ Argument | Arg1 | Arg2 | Arg3 | Arg4 | Arg5 | Arg6
 Register | RDI  | RSI  | RDX  | RCX  | R8   | R9   
 
 Return values are still found in <tt>RAX</tt>.
-
-As an extra twist to keep us on our toes, when performing AMD64 syscalls, the registers are slightly different. R10 is used in place of RCX for argument 4.
+ 
+As an extra twist to keep us on our toes, when performing AMD64 Syscalls, the registers are slightly different. R10 is used in place of RCX for argument 4.
 
 Argument | Arg1 | Arg2 | Arg3 | Arg4 | Arg5 | Arg6 
 ---------|:----:|:----:|:----:|:----:|:----:|:----:
