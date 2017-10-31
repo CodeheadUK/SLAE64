@@ -1,0 +1,87 @@
++++
+title = "Security Tube SLAE64 Course - Assessment 3 - Egg Hunter"
+author = "Codehead"
+layout = "post"
+date = "2017-10-30T14:02:00"
+url = "/slae64-03-egg-hunter/"
+categories = [ "SLAE64", "Assembler", "Shellcode" ]
+tags = [ "shellcode", "assembler", "linux", "x64" ]
++++
+
+After completing the video lectures of the [Security Tube Linux 64 bit Assembler Expert course (SLAE64)](http://www.securitytube-training.com/online-courses/x8664-assembly-and-shellcoding-on-linux/index.html), a series of assessments must be completed to gain certification. This is the third assignment; research and create an egg hunter proof of concept. 
+
+Egg hunting is a technique which can be used to solve shellcode space restriction problems. The egg hunter is a very small piece of code that searches the process memory for an 'egg'; a signature consisting of a known sequence of bytes. This signature is used to mark the start of the real payload, which could be much larger. Once the signature is located, the instruction pointer is redirected to the new location and the larger payload is executed.
+
+<!--more-->
+
+(Example?)
+
+## Searching memory
+
+In a 64 bit system the theoretical maximum address space is 16 Exabytes (18,446,744,073,709,551,616 bytes). However, the hardware requirements and management overhead of addressing the full memory range would be prohibitively expensive to implement. In current AMD64 implementations the lower 48 bits of an address are usable, allowing 256 TB (281,474,976,710,656 bytes) of memory to be addressed. The remaining bits of the upper two bytes must all match the state of the 47th bit (the last bit of the 6th byte) or a hardware exception is thrown.
+
+![image](img/x64-48bit-mem.png)
+
+The restriction on the upper two bytes of an address mean that we have two address range blocks in AMD64 systems: The first is from <tt>0x0000000000000000</tt> to <tt>0x00007FFFFFFFFFFF</tt> and is used by applications, the second is from <tt>0xFFFF800000000000</tt> to <tt>0xFFFFFFFFFFFFFFFF</tt> and is generally reserved for use by the operating system.
+
+Our egg value and shellcode target are probably going to be either on the heap or the stack, so the memory region we need to search is the lower <tt>0x0000000000000000</tt> to <tt>0x00007FFFFFFFFFFF</tt> range. 
+
+### The first attempt
+
+A naive implementation of the memory search would look something like this:
+
+{{< highlight asm >}}
+global _start
+section .text
+
+_start:
+    push 0x1
+    pop rdi
+    mov eax, 0x42414241
+_test:
+    scasd
+    je _found
+    inc rdi
+    loop _test
+    
+_found:
+    jmp rdi
+{{</ highlight >}}
+
+This code sets up by placing 1 in the <tt>RDI</tt> register and a target egg value in <tt>RAX</tt>. The <tt>INC</tt> and <tt>LOOP</tt> instructions take care of moving the <tt>RDI</tt> pointer across the memory range, while <tt>SCASD</tt> is used to to repeatedly compare the value of the referenced address with the egg value until we find a match. If a match is found, we jump to the location.
+
+Two problems crop up straight away with this approach:
+
+First, we get a segmentation fault when trying to access address 0x0000000000000001. That area of memory is not readable by our process and this stops the search dead.
+
+Looking at the memory map for our process while it is stopped in <tt>gdb</tt>, we can see the areas that are accessible:
+
+{{< highlight text >}}
+MBP:slae64$ ps -e | grep egg_hunter
+  3711 pts/0    00:00:00 egg_hunter
+
+MBP:slae64$ cat /proc/3711/maps
+00400000-00401000 r-xp 00000000 08:01 408067                         /home/codehead/SLAE64/assignment_3/egg_hunter
+00600000-00601000 rwxp 00000000 08:01 408067                         /home/codehead/SLAE64/assignment_3/egg_hunter
+7ffff7ffd000-7ffff7fff000 r-xp 00000000 00:00 0                      [vdso]
+7ffffffde000-7ffffffff000 rwxp 00000000 00:00 0                      [stack]
+ffffffffff600000-ffffffffff601000 r-xp 00000000 00:00 0              [vsyscall]
+{{</ highlight >}}
+
+Secondly, even if we do manage to read from the low addresses, we will probably hit the <tt>.text</tt> section of our program at in memory before stumbling across any heap or stack areas. In my tests, <tt>.text</tt> was at <tt>0x400080</tt>. Any heap memory will normally appear immediately after <tt>.text</tt> and the stack is way up at <tt>0x7fffffffe2b0</tt>. This means we'll see the egg value in our code before anything in the application's memory and our jump land back in the code it started from.
+
+To address the first problem, 
+
+
+### Choosing the egg
+
+We could scan backwards through memory from high to low. That would hit the stack and heap before the code, but it is better to have a better egg detection method to avoid the problem completely. Egg selection will be covered later in the 'Choosing an Egg' section.
+
+
+
+This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
+
+http://www.securitytube-training.com/online-courses/x8664-assembly-and-shellcoding-on-linux/index.html
+
+Student ID: SLAE64-1471
+
