@@ -2,37 +2,37 @@ global _start
 section .text
 
 _start:	
-	mov ebx, 0xfceb02eb
+	mov ebx, 0xfceb02eb ; Build egg signature
 	push rbx
 	shl rbx, 32
-	or rbx, [rsp]
+	or rbx, [rsp]   
 	xor rdx, rdx
 	push rdx 
-	mov dh, 0x10	; RDX = 0x1000 (PAGE_SIZE)
-	pop rdi			; zero RDI
+	mov dh, 0x10    ; RDX = 0x1000 (PAGE_SIZE)
+	pop rdi         ; Clear RDI
 	push rdi
-	pop rsi
+	pop rsi         ; Clear RSI
 	
 _page_test:
-	push 0x15
+	push 0x15       ; access syscall
 	pop rax
 	syscall
-	cmp al, -14
+	cmp al, -14     ; Check for EFAULT
 	jne short _egg_test_start
 	add rdi, rdx
 	jmp short _page_test
 	
 _egg_test_start:
-	push rdx		; 0xff8 loop count
+	push rdx        
 	pop rcx
-	sub ecx, 8
+	sub ecx, 8      ; 0xff8 loop count
 	
 _egg_test:
 	cmp rbx, [rdi]
 	je short _found
 	inc rdi
 	loop _egg_test
-	add rdi, 8
+	add rdi, 8      ; Align to 4k for next test
 	jmp short _page_test
 	
 _found:
