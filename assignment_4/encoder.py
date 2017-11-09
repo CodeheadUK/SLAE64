@@ -21,7 +21,6 @@ if len(bChunks) < 2:
 
 # Ensure even count of payload bytes
 if len(bChunks)%2 != 0:
-	print
 	bChunks.append(random.randint(1,255))
 
 print("")
