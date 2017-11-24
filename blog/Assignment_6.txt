@@ -2,7 +2,7 @@
 title = "Security Tube SLAE64 Course - Assessment 6 - Polymorphic Payloads"
 author = "Codehead"
 layout = "post"
-date = "2017-11-24T20:29:39"
+date = "2017-11-24T20:29:38"
 url = "/slae64-06-polymophic-payloads/"
 categories = [ "SLAE64", "Assembler", "Shellcode", "linux" ]
 tags = [ "shellcode", "assembler", "linux", "x64" ]
@@ -70,9 +70,7 @@ call _readfile
 path: db "/etc/passwdA"
 {{</ highlight >}}
 
-The original code uses the jump, call, pop method to locate the address of the '/etc/passwd' string at the end of the payload. We can mutate this by converting the string into a hex number and pushing it onto the stack. This involves reversing the string and breaking it into 8 byte chunks. 
-
-We can't use a NULL terminator on the string, so we'll use a value of 0x1 and fix it afterwards.
+The original code uses the jump, call, pop method to locate the address of the '<tt>/etc/passwd</tt>' string at the end of the payload. We can mutate this by converting the string into a hex number and pushing it onto the stack. This involves reversing the string and breaking it into 8 byte chunks. Note that we can't use a NULL terminator on the string, so we'll use a value of 0x1 and fix it afterwards.
 
 {{< highlight nasm >}}
 push 0x01647773             ; 0x01 + dws
@@ -221,9 +219,9 @@ add rax, 59
 syscall
 {{</ highlight >}}
 
-There has is another version of this code from another SLAE student on the ShellStorm site which is 1 byte smaller and uses some payload encoding. I decided to start with the original and see what I could do.
+There is another version of this code from another SLAE student on the ShellStorm site which is 1 byte smaller and uses some payload encoding. I decided to start with the original and see what I could do.
 
-The code is an <tt>execve</tt> call to the system's <tt>shutdown</tt> command. At the start the <tt>RAX</tt> and <tt>RDX</tt> registers are cleared. Looking through the code, <tt>RDX</tt> isn't used until the end where becomes a syscall parameter and <tt>RAX</tt> is used to push zeros onto the stack until the syscall at the end. This seems wasteful so we'll just clear <tt>RDX</tt> for zero pushes and worry about <tt>RAX</tt> later.
+The code is an <tt>execve</tt> call to the system's <tt>shutdown</tt> command. At the start the <tt>RAX</tt> and <tt>RDX</tt> registers are cleared. Looking through the code, <tt>RDX</tt> isn't used until the end where becomes a syscall parameter while <tt>RAX</tt> is used to push zeros onto the stack until the syscall at the end. This seems wasteful so we'll just clear <tt>RDX</tt> for zero pushes and worry about <tt>RAX</tt> later.
 
 {{< highlight nasm >}}
 _start:
@@ -231,11 +229,11 @@ xor rdx, rdx
 push rdx
 {{</ highlight >}}
 
-The first <tt>PUSH</tt> adds a NULL to end the argument array.
+The first <tt>PUSH</tt> adds a NULL to terminate the argument array which will be built in the next steps.
 
 The next three sections push the argument strings onto the stack. As we're working through the argument array in reverse, the '<tt>now</tt>' string is the first item.
 
-The original code uses pushes of hexadecimal values to build the strings. I decided to use <tt>NOT</tt> inverted strings throughout the code to hide the content. This conceals the string values in the raw shellcode and gets around the NULL byte problem at the same time. However, pushing and <tt>NOT</tt>ing the strings one at a time bloated the shellcode up to about 82 bytes.
+The original code pushes hexadecimal values to build the strings. I decided to use <tt>NOT</tt> inverted strings throughout the code to hide the content. This conceals the string values in the raw shellcode and gets around the NULL byte problem at the same time. However, pushing and <tt>NOT</tt>ing the strings one at a time bloated the shellcode up to about 82 bytes.
 
 {{< highlight nasm >}}
 ...
@@ -355,7 +353,7 @@ _cmd: db 0xd0, 0x8c, 0x9d, 0x96, 0x91, 0xd0, 0x8c, 0x97, 0x8a, 0x8b, 0x9b, 0x90,
 
 ## Add Host Mapping
 
-For the last example I decided to try another file based example. [Add map in /etc/hosts file](http://shell-storm.org/shellcode/files/shellcode-896.php) also by Osanda Malith Jayathissa is a 110 byte payload that adds a spoof mapping to the <tt>/etc/hosts</tt> file allowing redirection of network traffic.
+For the last example I decided to try another file based example: [Add map in /etc/hosts file](http://shell-storm.org/shellcode/files/shellcode-896.php) also by Osanda Malith Jayathissa. This is a 110 byte payload that adds a spoof mapping to the <tt>/etc/hosts</tt> file allowing redirection of network traffic.
 
 {{< highlight nasm >}}
 ; Title: Add map in /etc/hosts file - 110 bytes
@@ -410,9 +408,9 @@ data:
     text db '127.1.1.1 google.lk'
 {{</ highlight >}}
 
-For this exercise I decided to use a different method of string referencing. A <tt>CALL</tt> instruction can be used to jump over an inline string while helpfully placing the string's address on the stack. Unfortunately, because 64 bit <tt>CALL</tt>s are minimum of 4 bytes, they introduce zeros into the shellcode. This is normally handled by jumping backwards, but in this example we'll do something else.
+For this exercise I decided to use a different method of string referencing. A <tt>CALL</tt> instruction can be used to jump over an inline string while helpfully placing the string's address on the stack. Unfortunately, because 64 bit <tt>CALL</tt>s are minimum of 4 bytes, they introduce zeros into the shellcode. This is normally handled by jumping backwards, but in this example we'll try something else.
 
-In the first section where we call the <tt>SYS_OPEN</tt> syscall, the path string can be incorporated into the code with a <tt>CALL</tt> and really helps reduce the size of the final shellcode:
+In the first section where we call the <tt>SYS_OPEN</tt> syscall, the path string can be incorporated into the code with a <tt>CALL</tt>. This really helps reduce the size of the final shellcode:
 
 {{< highlight nasm >}}
 ; open
@@ -448,7 +446,7 @@ To solve this and obscure the string contents, we will encode the entire payload
 
 The remainder of the code is quite straightforward and we can make some quick optimisations to bring the size down.
 
-The final listing pre-encoding is [addhost_pre_encode.nasm](https://github.com/CodeheadUK/SLAE64/blob/master/assignment_6/addhost_pre_encode.nasm)
+The final pre-encoding version is [addhost_pre_encode.nasm](https://github.com/CodeheadUK/SLAE64/blob/master/assignment_6/addhost_pre_encode.nasm)
 
 {{< highlight nasm >}}
 _start:
@@ -562,4 +560,3 @@ This blog post has been created for completing the requirements of the SecurityT
 http://www.securitytube-training.com/online-courses/x8664-assembly-and-shellcoding-on-linux/index.html
 
 Student ID: SLAE64-1471
-
