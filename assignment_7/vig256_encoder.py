@@ -9,7 +9,7 @@ def main():
 	sc = args.shellcode.split(',')
 	enc = encrypt(sc, args.key)
 
-	print("Hex Shellcode")
+	print("\nHex Shellcode")
 	dumpHexCode(enc)
 	print("\nC Style Array")
 	dumpCodeArray(enc)
