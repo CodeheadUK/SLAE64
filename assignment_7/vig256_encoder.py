@@ -46,7 +46,7 @@ def dumpCodeArray(code):
 	sys.stdout.write("\";\n")
 
 def setArgs():
-	parser = argparse.ArgumentParser(description='Vigenere ecrypt shellcode')
+	parser = argparse.ArgumentParser(description='Vigenere encrypt shellcode')
 	parser.add_argument('shellcode', help='A shellcode string in 0xXX,0xXX,0xXX format.')
 	parser.add_argument('key', help='The encryption key string')
 
