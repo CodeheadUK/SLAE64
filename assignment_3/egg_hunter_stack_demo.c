@@ -18,6 +18,5 @@ main()
 	int (*ret)() = (int(*)())egghunter;
 
 	ret();
-
 }
 
