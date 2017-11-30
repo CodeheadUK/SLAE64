@@ -7,30 +7,23 @@ Student ID: SLAE64-1471
 
 The blog posts for the assignments can be found at:
 
-1. TCP Bind Shell
+1. TCP Bind Shell</br>
+  http://www.codehead.co.uk/slae64-01-bind-shell/
 
-http://www.codehead.co.uk/slae64-01-bind-shell/
+2. TCP Reverse Shell</br>
+  http://www.codehead.co.uk/slae64-02-reverse-shell/
 
-2. TCP Reverse Shell
+3. Egg Hunter</br>
+  http://www.codehead.co.uk/slae64-03-egg-hunter/
 
-http://www.codehead.co.uk/slae64-02-reverse-shell/
+4. Custom Encoding</br>
+  http://www.codehead.co.uk/slae64-04-custom-encoder/
 
-3. Egg Hunter
+5. Metasploit Payload Analysis</br>
+  http://www.codehead.co.uk/slae64-05-payload-analysis/
 
-http://www.codehead.co.uk/slae64-03-egg-hunter/
+6. Polymorphic Shellstorm Payloads</br>
+  http://www.codehead.co.uk/slae64-06-polymophic-payloads/
 
-4. Custom Encoding
-
-http://www.codehead.co.uk/slae64-04-custom-encoder/
-
-5. Metasploit Payload Analysis
-
-http://www.codehead.co.uk/slae64-05-payload-analysis/
-
-6. Polymorphic Shellstorm Payloads
-
-http://www.codehead.co.uk/slae64-06-polymophic-payloads/
-
-7. Encrypted Payload
-
-http://www.codehead.co.uk/slae64-07-payload-encryption/
+7. Encrypted Payload</br>
+  http://www.codehead.co.uk/slae64-07-payload-encryption/
