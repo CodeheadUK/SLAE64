@@ -1,3 +1,5 @@
+; Polymorphic version of http://shell-storm.org/shellcode/files/shellcode-878.php
+
 global _start
 section .TEXT exec write
 

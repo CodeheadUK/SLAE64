@@ -1,3 +1,7 @@
+; Decoder demo - Byte swapped payload is decoded and executed
+; Writeable .text section allows code to run from Nasm without need for shellcode wrapper
+; Bulid with: nasm -felf64 decode.nasm -o tmp.o && ld tmp.o -o decode
+
 global _start
 section .TEXT exec write
 

