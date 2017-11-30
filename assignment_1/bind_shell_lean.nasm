@@ -1,3 +1,6 @@
+; An optimised verison on the bind_shell code
+; Build with: nasm -felf64 bind_shell_lean.nasm -o tmp.o && ld tmp.o -o bind_shell_lean
+
 global _start
 section .text
 
