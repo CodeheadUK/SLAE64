@@ -5,57 +5,57 @@ section .TEXT exec write
 
 _start:
 ; Prompt for key
-mov ebx, 0x0a3f7965		; Build a prompt string
+mov ebx, 0x0a3f7965     ; Build a prompt string
 shl rbx, 8
 add rbx, 0x4b
 push rbx
-mov rsi, rsp			; Get prompt string addr
+mov rsi, rsp            ; Get prompt string addr
 push 5
-pop rdx					; String length
+pop rdx                 ; String length
 push 1
 pop rax
-syscall					; sys_write
+syscall                 ; sys_write
 
 ; Read response
-push 64					; Max string size
+push 64                 ; Max string size
 pop rdx
-add rsp, rdx			; Make room on the stack
-mov rsi, rsp			; Pointer to stack space
-xor rax, rax			; Clear syscall id
+add rsp, rdx            ; Make room on the stack
+mov rsi, rsp            ; Pointer to stack space
+xor rax, rax            ; Clear syscall id
 push rax
-pop rdi					; STDIN
+pop rdi                 ; STDIN
 syscall
 
-dec rax 				; String length minus newline
+dec rax                 ; String length minus newline
 
 ; Get the payload address
 jmp _code_marker
  
 _decode_start:
-pop rdi					; Payload address
-push 59					; Payload length
+pop rdi                 ; Payload address
+push 59                 ; Payload length
 pop rcx
-xor rdx, rdx			; Offset value
+xor rdx, rdx            ; Offset value
 
 ; Vigenere decode
 _decode:
-mov bl, [rdi]			; Get a byte from payload
-sub bl, [rsi+rdx]		; Subtract key value
-mov [rdi], bl			; Replace encoded value
+mov bl, [rdi]           ; Get a byte from payload
+sub bl, [rsi+rdx]       ; Subtract key value
+mov [rdi], bl           ; Replace encoded value
 
 ; Move pointers
-inc rdi					; Encoded data pointer
-inc rdx					; Key offset value
+inc rdi                 ; Encoded data pointer
+inc rdx                 ; Key offset value
 
 ; Check for loop in keystring
-cmp al, dl				; Compare to string length
+cmp al, dl              ; Compare to string length
 jne _next
-xor rdx, rdx			; Reset if required
+xor rdx, rdx            ; Reset if required
 
 _next:
 loop _decode
 
-jmp _payload     ; Jump to decoded payload
+jmp _payload            ; Jump to decoded payload
 
 _code_marker:
 call _decode_start
