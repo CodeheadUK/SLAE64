@@ -46,7 +46,7 @@ main(int argc, char **argv)
         exit(-1);
     }
     
-    // Allow access
+	// Allow access
 	send(sock, (char*)"Hi!\n", 4, 0);
 
 	dup2(sock, 0);	// STDIN
