@@ -1,3 +1,7 @@
+# Shellcode extraction tool
+# Dumps raw code from .text section of ELF files
+# Output in 'C' style and Python arrays
+
 start=$((16#`objdump -h $1 | grep -i ".text" | awk -F" " '{print $6}'`))
 length=$((16#`objdump -h $1 | grep -i ".text" | awk -F" " '{print $3}'`))
 echo $length bytes
